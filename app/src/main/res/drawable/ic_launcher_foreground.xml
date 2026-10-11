@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Peg -->
+    <path
+        android:fillColor="#CCFFFFFF"
+        android:pathData="M51,34h6v40h-6z" />
+    <!-- Ring stacked on the peg (edge-on) -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FF5FA8"
+        android:strokeWidth="5"
+        android:pathData="M38,62a16,5 0,1 0,32 0a16,5 0,1 0,-32 0z" />
+    <!-- Falling ring (face-on) -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#3FD0D4"
+        android:strokeWidth="5"
+        android:pathData="M60,40a10,10 0,1 0,20 0a10,10 0,1 0,-20 0z" />
+</vector>
