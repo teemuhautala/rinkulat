@@ -27,6 +27,37 @@ class TiersAndScoresTest {
     }
 
     @Test
+    fun levelTwistsFollowTheTable() {
+        val layouts = (1..Tiers.MAX_LEVEL).map { Tiers.layoutFor(it) }
+        assertEquals(listOf(1, 3, 4, 8, 10, 10, 10, 10, 10, 10), layouts.map { it.jets.size })
+        // Jets accumulate and never change position or direction once they appear.
+        for (i in 1 until layouts.size) {
+            assertEquals("level ${i + 1}", layouts[i - 1].jets, layouts[i].jets.take(layouts[i - 1].jets.size))
+        }
+        // Full set: five slots in each strip.
+        assertEquals((0..4).toSet(), layouts.last().jets.filter { it.fromTop }.map { it.slot }.toSet())
+        assertEquals((0..4).toSet(), layouts.last().jets.filterNot { it.fromTop }.map { it.slot }.toSet())
+        assertTrue(layouts[0].jets.single().big)
+        assertEquals(listOf(false, false, true, true, true, true, true, true, true, true), layouts.map { l -> l.jets.any { it.fromTop } })
+        assertEquals((6..10).toList(), (1..10).filter { layouts[it - 1].obstacle != null })
+        assertEquals((8..10).toList(), (1..10).filter { layouts[it - 1].upsideDown })
+        assertEquals(
+            listOf(Current.None, Current.None, Current.None, Current.None, Current.None, Current.None, Current.Right, Current.None, Current.Left, Current.Shear),
+            layouts.map { it.current },
+        )
+        // Corner jets (bottom from level 4, top from level 5) aim straight at the chamber center.
+        assertEquals(2, layouts[3].jets.count { it.slot == 0 || it.slot == 4 })
+        val corners = layouts[4].jets.filter { it.slot == 0 || it.slot == 4 }
+        assertEquals(4, corners.size)
+        corners.forEach { jet ->
+            val toCenterX = ChamberWorld.WIDTH / 2f - jet.x
+            val toCenterY = ChamberWorld.HEIGHT / 2f - jet.y
+            assertEquals(0f, toCenterX * jet.dirY - toCenterY * jet.dirX, 1e-4f) // parallel
+            assertTrue(toCenterX * jet.dirX + toCenterY * jet.dirY > 0f) // same way
+        }
+    }
+
+    @Test
     fun fasterClearScoresHigher() {
         assertTrue(Tiers.levelScore(5, 40f) > Tiers.levelScore(5, 10f))
         assertEquals(5 * 100 + 30 * 10, Tiers.levelScore(5, 29.2f))

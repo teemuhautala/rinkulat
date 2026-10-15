@@ -14,6 +14,94 @@ class ChamberWorldTest {
         repeat((seconds / step).toInt()) { step(step, gx, gy, pumping) }
     }
 
+    private fun ChamberWorld.runMask(seconds: Float, mask: Int, gx: Float = 0f, gy: Float = 1f) {
+        repeat((seconds / step).toInt()) { step(step, gx, gy, mask) }
+    }
+
+    @Test
+    fun onlyThePressedJetLiftsItsRing() {
+        val world = ChamberWorld(ringCount = 2, random = Random(20))
+        world.reset(2, Tiers.layoutFor(2))
+        // Jets 1 and 2 are the quarter-width bottom jets.
+        val (left, right) = world.rings
+        left.x = world.layout.jets[1].x
+        right.x = world.layout.jets[2].x
+        world.rings.forEach { it.y = ChamberWorld.HEIGHT - ChamberWorld.RING_RADIUS }
+        world.runMask(0.8f, mask = 1 shl 1)
+        assertTrue("left rose to ${left.y}", left.y < ChamberWorld.HEIGHT - 0.4f)
+        assertTrue("right stayed low at ${right.y}", right.y > ChamberWorld.HEIGHT - 0.3f)
+    }
+
+    @Test
+    fun upsideDownRingsRiseToTheCeiling() {
+        val world = ChamberWorld(ringCount = 1, random = Random(21))
+        world.reset(1, Tiers.layoutFor(8))
+        val ring = world.rings.single()
+        ring.x = 0.08f // Clear of pegs and obstacle.
+        ring.y = ChamberWorld.HEIGHT / 2f
+        world.run(10f)
+        assertTrue("ring at ${ring.y}", ring.y < 0.1f)
+    }
+
+    @Test
+    fun upsideDownPegCatchesRisingRingAndStacksTowardItsBase() {
+        val world = ChamberWorld(ringCount = 1, random = Random(22))
+        world.reset(1, Tiers.layoutFor(8))
+        val peg = world.pegs[0]
+        assertTrue("tip hangs below base", peg.tipY > peg.baseY)
+        val ring = world.rings.single()
+        ring.x = peg.x
+        ring.y = peg.tipY + 0.15f
+        ring.phi = (PI / 2).toFloat()
+        ring.roll = 0f
+        world.run(4f)
+        assertTrue(ring.isCaught)
+        assertEquals(peg.baseY, ring.y, 0.001f)
+        assertTrue(world.won)
+    }
+
+    @Test
+    fun obstacleKeepsRingsOut() {
+        val world = ChamberWorld(ringCount = 1, random = Random(23))
+        world.reset(1, Tiers.layoutFor(6))
+        val obstacle = world.layout.obstacle!!
+        val ring = world.rings.single()
+        ring.x = obstacle.x + 0.01f
+        ring.y = obstacle.y - 0.3f
+        world.run(3f)
+        val dx = ring.x - obstacle.x
+        val dy = ring.y - obstacle.y
+        assertTrue("ring passed below the obstacle", ring.y > obstacle.y)
+        assertTrue(kotlin.math.sqrt(dx * dx + dy * dy) > obstacle.radius)
+    }
+
+    @Test
+    fun rightCurrentCarriesRingsRight() {
+        val world = ChamberWorld(ringCount = 1, random = Random(24))
+        world.reset(1, LevelLayout("test", LevelLayout.CLASSIC.jets, current = Current.Right))
+        val ring = world.rings.single()
+        ring.x = 0.2f
+        ring.y = 0.2f
+        world.run(2f, gy = 0f)
+        assertTrue("ring x ${ring.x}", ring.x > 0.35f)
+    }
+
+    @Test
+    fun shearCurrentFlowsOppositeWaysTopAndBottom() {
+        val world = ChamberWorld(ringCount = 1, random = Random(25))
+        world.reset(1, Tiers.layoutFor(10))
+        val out = FloatArray(2)
+        var top = 0f
+        var bottom = 0f
+        // Average over x to cancel the turbulence term.
+        for (i in 1..19) {
+            world.flowAt(i / 20f, 0.3f, out); top += out[0]
+            world.flowAt(i / 20f, ChamberWorld.HEIGHT - 0.3f, out); bottom += out[0]
+        }
+        assertTrue("top $top", top > 0f)
+        assertTrue("bottom $bottom", bottom < 0f)
+    }
+
     @Test
     fun ringsSettleOnFloorAndStayInside() {
         val world = ChamberWorld(random = Random(1))

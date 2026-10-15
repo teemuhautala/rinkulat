@@ -17,6 +17,9 @@ object Tiers {
 
     fun secondsFor(level: Int) = START_SECONDS + (level - 1) * SECONDS_PER_LEVEL
 
+    /** Jets, obstacle, current and gravity for a level. */
+    fun layoutFor(level: Int) = LevelLayout.forTier(level)
+
     /** Finishing faster leaves more time on the clock, which scores higher. */
     fun levelScore(rings: Int, secondsLeft: Float) =
         rings * POINTS_PER_RING + ceil(secondsLeft.coerceAtLeast(0f)).toInt() * POINTS_PER_SECOND_LEFT

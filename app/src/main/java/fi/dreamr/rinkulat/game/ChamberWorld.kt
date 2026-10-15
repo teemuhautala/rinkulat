@@ -9,13 +9,14 @@ import kotlin.math.min
 import kotlin.math.sign
 import kotlin.math.sin
 import kotlin.math.sqrt
+import kotlin.math.tanh
 import kotlin.random.Random
 
 /**
  * Pure-Kotlin simulation of a water ring toss toy.
  *
  * World units: the chamber spans x in [0, WIDTH] and y in [0, HEIGHT], y grows downward
- * (same as screen coordinates). The jet nozzle sits at the bottom center.
+ * (same as screen coordinates). Jets, obstacles, currents and gravity direction come from [layout].
  */
 class ChamberWorld(
     ringCount: Int = DEFAULT_RING_COUNT,
@@ -49,14 +50,18 @@ class ChamberWorld(
         var settled = false
     }
 
-    class Peg(val x: Float, val tipY: Float, val baseY: Float)
+    /** A peg from [baseY] to [tipY]. [sink] is the direction (+1 down, -1 up) caught rings slide toward the base. */
+    class Peg(val x: Float, val tipY: Float, val baseY: Float) {
+        val sink = if (baseY > tipY) 1f else -1f
+    }
 
     class Particle(var x: Float, var y: Float, val size: Float, val isBubble: Boolean)
 
-    val pegs = listOf(
-        Peg(x = WIDTH * 0.3f, tipY = PEG_TIP_Y, baseY = PEG_BASE_Y),
-        Peg(x = WIDTH * 0.7f, tipY = PEG_TIP_Y, baseY = PEG_BASE_Y),
-    )
+    var layout: LevelLayout = LevelLayout.CLASSIC
+        private set
+
+    var pegs: List<Peg> = createPegs()
+        private set
 
     var rings: List<Ring> = createRings(ringCount)
         private set
@@ -70,7 +75,11 @@ class ChamberWorld(
         )
     }
 
-    /** Jet strength in [0, 1]; ramps up while pumping and lingers after release. */
+    /** Per-jet strength in [0, 1]; ramps up while its button is held and lingers after release. */
+    var jetStrengths = FloatArray(layout.jets.size)
+        private set
+
+    /** Strongest jet right now, for turbulence and visuals. */
     var jet = 0f
         private set
 
@@ -90,28 +99,40 @@ class ChamberWorld(
     private var accumulator = 0f
 
     /** Advance by a frame of [frameDt] seconds using fixed sub-steps. Gravity is in g units, screen axes. */
-    fun advance(frameDt: Float, gravityX: Float, gravityY: Float, pumping: Boolean) {
+    fun advance(frameDt: Float, gravityX: Float, gravityY: Float, pressedJets: Int) {
         accumulator += min(frameDt, MAX_FRAME_DT)
         while (accumulator >= STEP_DT) {
-            step(STEP_DT, gravityX, gravityY, pumping)
+            step(STEP_DT, gravityX, gravityY, pressedJets)
             accumulator -= STEP_DT
         }
     }
 
-    fun step(dt: Float, gravityX: Float, gravityY: Float, pumping: Boolean) {
+    fun advance(frameDt: Float, gravityX: Float, gravityY: Float, pumping: Boolean) =
+        advance(frameDt, gravityX, gravityY, if (pumping) ALL_JETS else 0)
+
+    fun step(dt: Float, gravityX: Float, gravityY: Float, pumping: Boolean) =
+        step(dt, gravityX, gravityY, if (pumping) ALL_JETS else 0)
+
+    /** One fixed step. Bit i of [pressedJets] holds jet i of the layout. */
+    fun step(dt: Float, gravityX: Float, gravityY: Float, pressedJets: Int) {
         time += dt
         // The clock starts with the first caught ring, so shaking the phone before pumping gains nothing.
         if (!started && rings.any { it.isCaught }) started = true
         if (started && !won) elapsed += dt
 
-        jet = if (pumping) {
-            jet + (1f - jet) * (1f - exp(-dt / JET_RISE_TIME))
-        } else {
-            jet * exp(-dt / JET_DECAY_TIME)
+        jet = 0f
+        for (i in jetStrengths.indices) {
+            val s = jetStrengths[i]
+            jetStrengths[i] = if (pressedJets and (1 shl i) != 0) {
+                s + (1f - s) * (1f - exp(-dt / JET_RISE_TIME))
+            } else {
+                s * exp(-dt / JET_DECAY_TIME)
+            }
+            jet = max(jet, jetStrengths[i])
         }
 
         val gx = gravityX * EFFECTIVE_GRAVITY
-        val gy = gravityY * EFFECTIVE_GRAVITY
+        val gy = gravityY * EFFECTIVE_GRAVITY * if (layout.upsideDown) -1f else 1f
 
         for (ring in rings) {
             if (ring.isCaught) stepCaught(ring, dt, gy) else stepFree(ring, dt, gx, gy)
@@ -127,23 +148,49 @@ class ChamberWorld(
 
     /** Liquid velocity at a point, as (vx, vy) packed into [out]. */
     fun flowAt(x: Float, y: Float, out: FloatArray) {
-        val dx = x - WIDTH / 2f
-        val depth = (HEIGHT - y) / HEIGHT // 0 at the nozzle, 1 at the top
-        val spread = PLUME_BASE_WIDTH + PLUME_WIDENING * depth
-        val plume = exp(-(dx * dx) / (2f * spread * spread))
-        val strength = jet * JET_SPEED * (1f - 0.55f * depth)
-
         var vx = 0f
-        var vy = -strength * plume
-        // Near the nozzle liquid is drawn in from the sides.
-        vx -= jet * INFLOW_SPEED * sign(dx) * exp(-(HEIGHT - y) / 0.12f) * (1f - plume)
-        // At the top the plume fans out toward the walls.
-        vx += jet * SPREAD_SPEED * sign(dx) * exp(-y / 0.25f) * min(1f, abs(dx) / 0.1f)
-        // Return flow down the side walls.
+        var vy = 0f
         val wallDist = min(x, WIDTH - x)
-        vy += jet * RETURN_SPEED * exp(-(wallDist * wallDist) / (2f * 0.08f * 0.08f))
+        val wallReturn = exp(-(wallDist * wallDist) / (2f * 0.08f * 0.08f))
 
-        // Gentle swirling turbulence, stronger while the jet runs.
+        for ((i, j) in layout.jets.withIndex()) {
+            val strength = jetStrengths[i]
+            if (strength < 1e-4f) continue
+            // Jet-local coordinates: along the jet, and across it (perpendicular = (-dirY, dirX)).
+            val px = x - j.x
+            val py = y - j.y
+            val along = px * j.dirX + py * j.dirY
+            val across = -px * j.dirY + py * j.dirX
+            val reach = reachOf(j)
+            val depth = (along / reach).coerceIn(0f, 1f) // 0 at the nozzle, 1 at the far wall
+            val power = if (j.big) 1f else SMALL_JET_SPEED / JET_SPEED
+            val spread = (if (j.big) PLUME_BASE_WIDTH else SMALL_PLUME_WIDTH) + PLUME_WIDENING * depth
+            val plume = if (along < -0.02f) 0f else exp(-(across * across) / (2f * spread * spread))
+            val speed = strength * JET_SPEED * power * (1f - 0.55f * depth)
+            val side = sign(across)
+
+            vx += j.dirX * speed * plume
+            vy += j.dirY * speed * plume
+            // Near the nozzle liquid is drawn in from the sides.
+            val inflow = strength * power * INFLOW_SPEED * side * exp(-max(along, 0f) / 0.12f) * (1f - plume)
+            // At the far wall the plume fans out sideways.
+            val fanOut = strength * power * SPREAD_SPEED * side * exp(-(reach - along).coerceAtLeast(0f) / 0.25f) *
+                min(1f, abs(across) / 0.1f)
+            vx += (fanOut - inflow) * -j.dirY
+            vy += (fanOut - inflow) * j.dirX
+            // Return flow along the side walls, against the jet's vertical push.
+            vy += -j.dirY * strength * power * RETURN_SPEED * wallReturn
+        }
+
+        vx += when (layout.current) {
+            Current.None -> 0f
+            Current.Right -> CURRENT_SPEED
+            Current.Left -> -CURRENT_SPEED
+            // Upper half flows right, lower half left, blended across the middle.
+            Current.Shear -> CURRENT_SPEED * tanh((HEIGHT / 2f - y) / 0.05f)
+        }
+
+        // Gentle swirling turbulence, stronger while a jet runs.
         val turb = TURBULENCE * (0.15f + jet)
         vx += turb * sin(7.3f * y + 1.7f * time) * cos(4.1f * x - 1.1f * time)
         vy += turb * 0.6f * sin(6.1f * x + 2.3f * time) * cos(5.7f * y + 0.7f * time)
@@ -152,9 +199,12 @@ class ChamberWorld(
         out[1] = vy
     }
 
-    /** Scatter a fresh set of [ringCount] rings on the floor and clear timer and win state. */
-    fun reset(ringCount: Int = rings.size) {
+    /** Scatter a fresh set of [ringCount] rings for [layout] and clear timer and win state. */
+    fun reset(ringCount: Int = rings.size, layout: LevelLayout = this.layout) {
+        this.layout = layout
+        pegs = createPegs()
         rings = createRings(ringCount)
+        jetStrengths = FloatArray(layout.jets.size)
         jet = 0f
         elapsed = 0f
         started = false
@@ -164,6 +214,7 @@ class ChamberWorld(
 
     private val flow = FloatArray(2)
     private val flowSide = FloatArray(2)
+    private val spin = FloatArray(2)
 
     private fun stepFree(ring: Ring, dt: Float, gx: Float, gy: Float) {
         flowAt(ring.x, ring.y, flow)
@@ -182,9 +233,10 @@ class ChamberWorld(
         val relSpeed = sqrt((flow[0] - ring.vx).let { it * it } + (flow[1] - ring.vy).let { it * it })
         val speed = sqrt(ring.vx * ring.vx + ring.vy * ring.vy)
         val wobble = relSpeed + jet * 0.5f + IDLE_TUMBLE
-        // The jet spins rings hardest low down and near the nozzle; high and off-center rings barely feel it.
-        val jetSpin = jetSpinInfluence(ring.x, ring.y)
-        val sideOffset = ((ring.x - WIDTH / 2f) / 0.1f).coerceIn(-1f, 1f)
+        // Jets spin rings hardest close to the nozzle and on the jet axis; far and off-axis rings barely feel it.
+        jetSpin(ring.x, ring.y, spin)
+        val jetSpin = spin[0]
+        val sideDrive = spin[1]
 
         val torque = TUMBLE_SHEAR * shear +
             FLATTEN_TORQUE * speed * sin(2f * ring.phi) +
@@ -193,24 +245,31 @@ class ChamberWorld(
         ring.omega = (ring.omega + torque * dt) * exp(-ANGULAR_DAMPING * dt)
         ring.phi = wrapAngle(ring.phi + ring.omega * dt)
 
-        // Roll: the plume pushes one side of an off-center ring harder, spinning it away from the center.
-        val rollTorque = JET_ROLL_SPIN * jetSpin * (sideOffset + 0.5f * randomSigned()) -
+        // Roll: a plume pushes one side of an off-axis ring harder, spinning it away from the axis.
+        val rollTorque = JET_ROLL_SPIN * (sideDrive + 0.5f * jetSpin * randomSigned()) -
             ROLL_FLATTEN_TORQUE * speed * sin(2f * ring.roll) +
             ROLL_NOISE * wobble * randomSigned()
         ring.rollOmega = (ring.rollOmega + rollTorque * dt) * exp(-ANGULAR_DAMPING * dt)
         ring.roll = wrapAngle(ring.roll + ring.rollOmega * dt)
 
         tryCatch(ring)
-        if (!ring.isCaught) collidePegs(ring)
+        if (!ring.isCaught) {
+            for (peg in pegs) {
+                val cy = ring.y.coerceIn(min(peg.tipY, peg.baseY), max(peg.tipY, peg.baseY))
+                pushOut(ring, peg.x, cy, PEG_RADIUS, onTip = cy == peg.tipY)
+            }
+            layout.obstacle?.let { pushOut(ring, it.x, it.y, it.radius, onTip = true) }
+        }
     }
 
     private fun tryCatch(ring: Ring) {
-        if (ring.vy <= -0.05f) return
         if (ring.flatness < CATCH_MIN_FLATNESS) return
         for ((index, peg) in pegs.withIndex()) {
+            // Must be moving toward the base, not being pushed away from it.
+            if (ring.vy * peg.sink <= -0.05f) continue
             val dx = abs(ring.x - peg.x)
-            val above = peg.tipY - ring.y
-            if (dx < CATCH_TOLERANCE && above > -0.01f && above < RING_RADIUS + PEG_RADIUS) {
+            val beforeTip = (peg.tipY - ring.y) * peg.sink
+            if (dx < CATCH_TOLERANCE && beforeTip > -0.01f && beforeTip < RING_RADIUS + PEG_RADIUS) {
                 ring.peg = index
                 ring.x = peg.x
                 ring.vx = 0f
@@ -222,11 +281,12 @@ class ChamberWorld(
     private fun stepCaught(ring: Ring, dt: Float, gy: Float) {
         val peg = pegs[ring.peg]
         flowAt(ring.x, ring.y, flow)
-        // Constrained to slide along the vertical peg; the liquid grips it less than a free ring.
+        // Constrained to slide along the peg; the liquid grips it less than a free ring.
         ring.vy += (DRAG * CAUGHT_FLOW_COUPLING * (flow[1] - ring.vy) + gy) * dt
-        // Friction resists only upward pushes, so rings still slide down freely but the jet
-        // has to overcome it before lifting them off.
-        if (ring.vy < 0f) ring.vy = min(0f, ring.vy + PEG_FRICTION * dt)
+        // Friction resists only pushes away from the base, so rings still slide down freely but
+        // the jet has to overcome it before lifting them off.
+        val towardBase = ring.vy * peg.sink
+        if (towardBase < 0f) ring.vy = min(0f, towardBase + PEG_FRICTION * dt) * peg.sink
         ring.y += ring.vy * dt
         ring.x = peg.x
         ring.vx = 0f
@@ -242,51 +302,49 @@ class ChamberWorld(
         ring.roll = wrapAngle(ring.roll + (rollTarget - ring.roll) * min(1f, 6f * dt))
         ring.rollOmega = 0f
 
-        if (ring.y < peg.tipY - RELEASE_MARGIN) {
-            // Pushed off the top of the peg.
+        if ((peg.tipY - ring.y) * peg.sink > RELEASE_MARGIN) {
+            // Pushed off the end of the peg.
             ring.peg = -1
         }
     }
 
-    /** Caught rings rest on the peg base and on top of each other. */
+    /** Caught rings rest on the peg base and on each other. */
     private fun stackCaughtRings() {
         for ((index, peg) in pegs.withIndex()) {
             var floor = peg.baseY
             rings.filter { it.peg == index }
-                .sortedByDescending { it.y }
+                .sortedByDescending { it.y * peg.sink }
                 .forEach { ring ->
-                    if (ring.y > floor) {
+                    if ((ring.y - floor) * peg.sink > 0f) {
                         ring.y = floor
-                        if (ring.vy > 0f) ring.vy = 0f
+                        if (ring.vy * peg.sink > 0f) ring.vy = 0f
                     }
-                    ring.settled = ring.y >= floor - SETTLE_TOLERANCE && ring.vy >= 0f
-                    floor = ring.y - RING_STACK_HEIGHT
+                    ring.settled = (ring.y - floor) * peg.sink >= -SETTLE_TOLERANCE && ring.vy * peg.sink >= 0f
+                    floor = ring.y - RING_STACK_HEIGHT * peg.sink
                 }
         }
     }
 
-    private fun collidePegs(ring: Ring) {
-        for (peg in pegs) {
-            // Closest point on the peg segment.
-            val cy = ring.y.coerceIn(peg.tipY, peg.baseY)
-            val dx = ring.x - peg.x
-            val dy = ring.y - cy
-            val dist = sqrt(dx * dx + dy * dy)
-            val minDist = PEG_RADIUS + RING_RADIUS * ringExtent(ring, dx, dy, dist)
-            if (dist < minDist) {
-                val (nx, ny) = if (dist > 1e-5f) dx / dist to dy / dist else (if (random.nextBoolean()) 1f else -1f) to 0f
-                val push = minDist - dist
-                ring.x += nx * push
-                ring.y += ny * push
-                val vn = ring.vx * nx + ring.vy * ny
-                if (vn < 0f) {
-                    ring.vx -= (1f + RESTITUTION) * vn * nx
-                    ring.vy -= (1f + RESTITUTION) * vn * ny
-                }
-                // Balanced on the tip: tip it off to one side.
-                if (cy == peg.tipY && abs(dx) < 0.004f) ring.vx += (if (random.nextBoolean()) 0.05f else -0.05f)
-            }
+    /**
+     * Push a free ring out of a round contact at ([cx], [cy]) with [radius] and bounce it.
+     * [onTip] marks a contact a ring could balance on, which gets nudged off to one side.
+     */
+    private fun pushOut(ring: Ring, cx: Float, cy: Float, radius: Float, onTip: Boolean) {
+        val dx = ring.x - cx
+        val dy = ring.y - cy
+        val dist = sqrt(dx * dx + dy * dy)
+        val minDist = radius + RING_RADIUS * ringExtent(ring, dx, dy, dist)
+        if (dist >= minDist) return
+        val (nx, ny) = if (dist > 1e-5f) dx / dist to dy / dist else (if (random.nextBoolean()) 1f else -1f) to 0f
+        val push = minDist - dist
+        ring.x += nx * push
+        ring.y += ny * push
+        val vn = ring.vx * nx + ring.vy * ny
+        if (vn < 0f) {
+            ring.vx -= (1f + RESTITUTION) * vn * nx
+            ring.vy -= (1f + RESTITUTION) * vn * ny
         }
+        if (onTip && abs(dx) < 0.004f) ring.vx += (if (random.nextBoolean()) 0.05f else -0.05f)
     }
 
     /** Projected ring half-extent along a direction, as a fraction of its radius. */
@@ -308,23 +366,66 @@ class ChamberWorld(
         return sqrt(along * along + across * across * minor * minor)
     }
 
-    /** How strongly the jet spins a ring at this position, in [0, 1]. */
+    /** How strongly the jets spin a ring at this position, in [0, 1]. */
     internal fun jetSpinInfluence(x: Float, y: Float): Float {
-        val dx = x - WIDTH / 2f
-        val lowness = y / HEIGHT
-        return jet * exp(-(dx * dx) / (2f * JET_SPIN_WIDTH * JET_SPIN_WIDTH)) * (0.15f + 0.85f * lowness * lowness)
+        jetSpin(x, y, spin)
+        return spin[0]
+    }
+
+    /** Writes total jet spin influence (0..1) and the signed roll drive from being off a jet's axis. */
+    private fun jetSpin(x: Float, y: Float, out: FloatArray) {
+        var influence = 0f
+        var sideDrive = 0f
+        for ((i, j) in layout.jets.withIndex()) {
+            val strength = jetStrengths[i]
+            if (strength < 1e-4f) continue
+            val px = x - j.x
+            val py = y - j.y
+            val along = px * j.dirX + py * j.dirY
+            if (along < -0.05f) continue
+            val across = -px * j.dirY + py * j.dirX
+            val closeness = 1f - (along / reachOf(j)).coerceIn(0f, 1f)
+            val k = strength * exp(-(across * across) / (2f * JET_SPIN_WIDTH * JET_SPIN_WIDTH)) *
+                (0.15f + 0.85f * closeness * closeness)
+            influence += k
+            sideDrive += k * (across / 0.1f).coerceIn(-1f, 1f)
+        }
+        out[0] = min(1f, influence)
+        out[1] = sideDrive
+    }
+
+    /** Distance from a nozzle to the chamber boundary along its direction. */
+    private fun reachOf(j: Jet): Float {
+        val tx = when {
+            j.dirX > 1e-4f -> (WIDTH - j.x) / j.dirX
+            j.dirX < -1e-4f -> -j.x / j.dirX
+            else -> Float.MAX_VALUE
+        }
+        val ty = when {
+            j.dirY > 1e-4f -> (HEIGHT - j.y) / j.dirY
+            j.dirY < -1e-4f -> -j.y / j.dirY
+            else -> Float.MAX_VALUE
+        }
+        return max(min(tx, ty), 0.1f)
     }
 
     private fun randomSigned() = random.nextFloat() * 2f - 1f
+
+    private fun createPegs(): List<Peg> {
+        // Upside down mirrors the pegs vertically: they hang from above, tips pointing down.
+        fun mirror(y: Float) = if (layout.upsideDown) HEIGHT - y else y
+        return listOf(WIDTH * 0.3f, WIDTH * 0.7f).map { x -> Peg(x, mirror(PEG_TIP_Y), mirror(PEG_BASE_Y)) }
+    }
 
     private fun createRings(count: Int): List<Ring> {
         // More rings need a taller pile to start from.
         val pileHeight = 0.25f + count * 0.008f
         return List(count) { i ->
+            val offset = RING_RADIUS + random.nextFloat() * pileHeight
             Ring(
                 colorIndex = i % RING_COLOR_COUNT,
                 x = RING_RADIUS + random.nextFloat() * (WIDTH - 2 * RING_RADIUS),
-                y = HEIGHT - RING_RADIUS - random.nextFloat() * pileHeight,
+                y = if (layout.upsideDown) offset else HEIGHT - offset,
             ).also {
                 it.phi = random.nextFloat() * PI.toFloat()
                 it.roll = randomRoll()
@@ -376,9 +477,11 @@ class ChamberWorld(
             ring.x = WIDTH - halfW
             if (ring.vx > 0f) ring.vx = -ring.vx * RESTITUTION
         }
+        // Floor and ceiling both get friction, since either can be "down".
         if (ring.y < halfH) {
             ring.y = halfH
             if (ring.vy < 0f) ring.vy = -ring.vy * RESTITUTION
+            ring.vx *= FLOOR_FRICTION
         } else if (ring.y > HEIGHT - halfH) {
             ring.y = HEIGHT - halfH
             if (ring.vy > 0f) ring.vy = -ring.vy * RESTITUTION
@@ -395,7 +498,12 @@ class ChamberWorld(
             if (p.x < 0f) p.x += WIDTH else if (p.x > WIDTH) p.x -= WIDTH
             if (p.y < 0f) {
                 p.y = HEIGHT
-                p.x = if (p.isBubble) WIDTH / 2f + (random.nextFloat() - 0.5f) * 0.1f else random.nextFloat() * WIDTH
+                // Bubbles come out of a nozzle.
+                p.x = if (p.isBubble) {
+                    (layout.jets.random(random).x + (random.nextFloat() - 0.5f) * 0.1f).coerceIn(0f, WIDTH)
+                } else {
+                    random.nextFloat() * WIDTH
+                }
             } else if (p.y > HEIGHT) {
                 p.y = 0f
             }
@@ -424,20 +532,26 @@ class ChamberWorld(
         const val PEG_COUNT = 2
         const val PARTICLE_COUNT = 60
 
+        /** Pressed-jets mask with every jet held. */
+        const val ALL_JETS = -1
+
         // Simulation timing.
         const val STEP_DT = 1f / 120f
         const val MAX_FRAME_DT = 0.05f
 
-        // Tuning: liquid and jet.
+        // Tuning: liquid and jets.
         const val JET_SPEED = 3.2f
+        const val SMALL_JET_SPEED = 2.6f
         const val JET_RISE_TIME = 0.12f
         const val JET_DECAY_TIME = 0.45f
         const val PLUME_BASE_WIDTH = 0.07f
+        const val SMALL_PLUME_WIDTH = 0.05f
         const val PLUME_WIDENING = 0.22f
         const val INFLOW_SPEED = 0.6f
         const val SPREAD_SPEED = 1.2f
         const val RETURN_SPEED = 0.7f
         const val TURBULENCE = 0.12f
+        const val CURRENT_SPEED = 0.15f
 
         // Tuning: rings.
         const val EFFECTIVE_GRAVITY = 1.1f
@@ -449,7 +563,7 @@ class ChamberWorld(
         /** Baseline wobble so rings keep tumbling a little even in still liquid. */
         const val IDLE_TUMBLE = 0.08f
 
-        // Jet-driven spin, strongest for low rings near the nozzle (see jetSpinInfluence).
+        // Jet-driven spin, strongest near the nozzle and on the jet axis (see jetSpin).
         const val JET_SPIN_WIDTH = 0.18f
         const val JET_TUMBLE_SPIN = 60f
         const val JET_ROLL_SPIN = 30f

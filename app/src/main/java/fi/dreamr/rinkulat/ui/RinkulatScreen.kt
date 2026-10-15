@@ -6,29 +6,37 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,6 +56,8 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -55,6 +65,9 @@ import fi.dreamr.rinkulat.game.ChamberWorld
 import fi.dreamr.rinkulat.game.GameMode
 import fi.dreamr.rinkulat.game.GamePhase
 import fi.dreamr.rinkulat.game.HudState
+import fi.dreamr.rinkulat.game.Jet
+import fi.dreamr.rinkulat.game.LevelLayout
+import fi.dreamr.rinkulat.game.Obstacle
 import fi.dreamr.rinkulat.game.GameViewModel
 import fi.dreamr.rinkulat.game.rememberTiltReading
 import fi.dreamr.rinkulat.ui.theme.Backdrop
@@ -76,7 +89,10 @@ import kotlin.math.sin
 @Composable
 fun RinkulatScreen(viewModel: GameViewModel = viewModel()) {
     val tilt = rememberTiltReading()
-    var pumping by remember { mutableStateOf(false) }
+    // Bit i is set while the button for jet i is held.
+    val pressedJets = remember { mutableIntStateOf(0) }
+    // A new layout brings new buttons; drop presses held on the old ones.
+    LaunchedEffect(viewModel.layout) { pressedJets.intValue = 0 }
 
     LaunchedEffect(viewModel) {
         var last = 0L
@@ -84,7 +100,7 @@ fun RinkulatScreen(viewModel: GameViewModel = viewModel()) {
             withFrameNanos { now ->
                 val dt = if (last == 0L) 0f else (now - last) / 1_000_000_000f
                 last = now
-                viewModel.advance(dt, tilt.x, tilt.y, pumping)
+                viewModel.advance(dt, tilt.x, tilt.y, pressedJets.intValue)
             }
         }
     }
@@ -103,25 +119,28 @@ fun RinkulatScreen(viewModel: GameViewModel = viewModel()) {
         ) {
             Hud(
                 state = viewModel.hud,
+                atStart = viewModel.phase == GamePhase.Menu,
                 showRestart = viewModel.mode == GameMode.FreePlay && viewModel.phase == GamePhase.Playing,
                 onRestart = viewModel::startFreePlay,
-                onMenu = viewModel::openMenu,
+                onHome = viewModel::openMenu,
+                onScores = { viewModel.showScores() },
             )
             Spacer(Modifier.height(12.dp))
             ToyCase(
                 world = viewModel.world,
+                layout = viewModel.layout,
                 frame = { viewModel.frame },
-                pumping = pumping,
-                onPumpingChange = { pumping = it },
+                pressedJets = pressedJets.intValue,
+                onSwipe = if (viewModel.hud.canSwipeLevels) viewModel::changeLevel else null,
+                onJetPressChange = { jet, down ->
+                    val bit = 1 shl jet
+                    pressedJets.intValue = if (down) pressedJets.intValue or bit else pressedJets.intValue and bit.inv()
+                },
                 modifier = Modifier.weight(1f),
             )
         }
-        if (viewModel.phase == GamePhase.Menu) {
-            MenuOverlay(
-                onFreePlay = viewModel::startFreePlay,
-                onTiers = viewModel::startTiers,
-                onScores = { viewModel.showScores() },
-            )
+        if (viewModel.phase == GamePhase.Menu && !viewModel.scoresVisible) {
+            StartButtons(onChallenge = viewModel::startChallenge, onFreePlay = viewModel::startFreePlay)
         }
         PhaseOverlay(
             phase = viewModel.phase,
@@ -129,12 +148,12 @@ fun RinkulatScreen(viewModel: GameViewModel = viewModel()) {
             onNextLevel = viewModel::nextLevel,
             onPlayAgain = viewModel::playAgain,
             onScores = { viewModel.showScores() },
-            onMenu = viewModel::openMenu,
+            onQuit = viewModel::openMenu,
         )
         if (viewModel.scoresVisible) {
             ScoresOverlay(
                 tab = viewModel.scoresTab,
-                tierScores = viewModel.tierScores,
+                challengeScores = viewModel.challengeScores,
                 freePlayTimes = viewModel.freePlayTimes,
                 latestEntry = viewModel.latestEntry,
                 onTabChange = viewModel::showScores,
@@ -145,43 +164,104 @@ fun RinkulatScreen(viewModel: GameViewModel = viewModel()) {
 }
 
 @Composable
-private fun Hud(state: HudState, showRestart: Boolean, onRestart: () -> Unit, onMenu: () -> Unit) {
+private fun Hud(
+    state: HudState,
+    atStart: Boolean,
+    showRestart: Boolean,
+    onRestart: () -> Unit,
+    onHome: () -> Unit,
+    onScores: () -> Unit,
+) {
+    // Fixed height and widths so the chamber below never changes size between levels.
     Row(
-        Modifier.fillMaxWidth(),
+        Modifier
+            .widthIn(max = 480.dp)
+            .fillMaxWidth()
+            .height(60.dp)
+            .toyPanel(RoundedCornerShape(20.dp))
+            .padding(start = 14.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Column {
-            state.level?.let { Text("Level $it", color = ButtonTeal, fontSize = 14.sp, fontWeight = FontWeight.Bold) }
+        Column(Modifier.weight(1f)) {
+            val topLine = when {
+                atStart -> "Pump, tilt, catch the rings"
+                state.level == null -> ""
+                state.canSwipeLevels -> "‹ Level ${state.level} ›  ${state.levelTitle}"
+                else -> "Level ${state.level} · ${state.levelTitle}"
+            }
             Text(
-                "Caught ${state.caught}/${state.total}",
-                color = Color.White,
+                topLine,
+                color = PanelTextDim,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                if (atStart) "Rinkulat" else "Caught ${state.caught}/${state.total}",
+                color = PanelText,
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold,
+                maxLines = 1,
             )
         }
         Text(
-            formatTime(state.seconds),
-            color = if (state.lowTime) Color(0xFFFF6B6B) else Color.White.copy(alpha = 0.8f),
+            if (atStart) "" else formatTime(state.seconds),
+            modifier = Modifier.width(72.dp),
+            textAlign = TextAlign.Center,
+            color = if (state.lowTime) LowTimeRed else PanelText,
             fontSize = 22.sp,
-            fontWeight = if (state.lowTime) FontWeight.Bold else FontWeight.Normal,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
         )
-        Row {
-            if (showRestart) TextButton(onClick = onRestart) { Text("Restart") }
-            TextButton(onClick = onMenu) { Text("Menu") }
+        Row(Modifier.width(96.dp), horizontalArrangement = Arrangement.End) {
+            if (atStart) {
+                IconButton(onClick = onScores) {
+                    Icon(Icons.Default.Star, contentDescription = "Scores", tint = PanelText)
+                }
+            } else {
+                if (showRestart) {
+                    IconButton(onClick = onRestart) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Restart", tint = PanelText)
+                    }
+                }
+                IconButton(onClick = onHome) {
+                    Icon(Icons.Default.Home, contentDescription = "Quit to start", tint = PanelText)
+                }
+            }
         }
     }
 }
 
+/** Readable on the orange panel, unlike a bright red. */
+private val LowTimeRed = Color(0xFF7A0010)
+
 @Composable
 private fun ToyCase(
     world: ChamberWorld,
+    layout: LevelLayout,
     frame: () -> Long,
-    pumping: Boolean,
-    onPumpingChange: (Boolean) -> Unit,
+    pressedJets: Int,
+    onJetPressChange: (jet: Int, down: Boolean) -> Unit,
+    onSwipe: ((delta: Int) -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
     val caseShape = RoundedCornerShape(36.dp)
+    val indexedJets = layout.jets.withIndex().toList()
+    val topJets = indexedJets.filter { it.value.fromTop }
+    val bottomJets = indexedJets.filterNot { it.value.fromTop }
+
+    // Both strips are always shown at the same size, so the chamber never changes between levels.
+    @Composable
+    fun Strip(jets: List<IndexedValue<Jet>>) = ButtonStrip(
+        jets = jets,
+        pressedJets = pressedJets,
+        onJetPressChange = onJetPressChange,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(70.dp),
+    )
+
     Column(
         modifier
             .widthIn(max = 480.dp)
@@ -191,55 +271,105 @@ private fun ToyCase(
             .border(6.dp, CaseEdge.copy(alpha = 0.7f), caseShape)
             .padding(14.dp),
     ) {
-        Chamber(
-            world = world,
-            frame = frame,
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(24.dp)),
-        )
+        Strip(topJets)
         Spacer(Modifier.height(10.dp))
-        PumpButton(
-            pumping = pumping,
-            onPumpingChange = onPumpingChange,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(150.dp),
-        )
+        // Keep the chamber at the simulation's aspect ratio so walls, jets and the center line up with what's drawn.
+        Box(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            contentAlignment = Alignment.Center,
+        ) {
+            Chamber(
+                world = world,
+                frame = frame,
+                modifier = Modifier
+                    .aspectRatio(ChamberWorld.WIDTH / ChamberWorld.HEIGHT, matchHeightConstraintsFirst = true)
+                    .clip(RoundedCornerShape(24.dp))
+                    .then(if (onSwipe != null) Modifier.swipeLevels(onSwipe) else Modifier),
+            )
+        }
+        Spacer(Modifier.height(10.dp))
+        Strip(bottomJets)
+    }
+}
+
+/** Horizontal swipe: left goes to the next level (+1), right to the previous (-1). */
+private fun Modifier.swipeLevels(onSwipe: (delta: Int) -> Unit) = pointerInput(onSwipe) {
+    val threshold = 64.dp.toPx()
+    var total = 0f
+    detectHorizontalDragGestures(
+        onDragStart = { total = 0f },
+        onDragEnd = { if (abs(total) > threshold) onSwipe(if (total < 0f) 1 else -1) },
+        onHorizontalDrag = { _, dragAmount -> total += dragAmount },
+    )
+}
+
+/** A row of button slots (corner, quarter, center, three quarters, corner); each jet's button sits in its slot. */
+@Composable
+private fun ButtonStrip(
+    jets: List<IndexedValue<Jet>>,
+    pressedJets: Int,
+    onJetPressChange: (jet: Int, down: Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(Color.White.copy(alpha = 0.12f))
+            .padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        for (slot in 0 until LevelLayout.SLOTS_PER_STRIP) {
+            val jet = jets.firstOrNull { it.value.slot == slot }
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
+                contentAlignment = Alignment.Center,
+            ) {
+                val buttonModifier = Modifier
+                    .padding(4.dp)
+                    .widthIn(max = 58.dp)
+                    .fillMaxWidth()
+                    .aspectRatio(1f)
+                // Unused slots stay empty but keep their space, so buttons don't move between levels.
+                if (jet != null) {
+                    val index = jet.index
+                    PumpButton(
+                        pressed = pressedJets and (1 shl index) != 0,
+                        onPressChange = { onJetPressChange(index, it) },
+                        modifier = buttonModifier,
+                    )
+                }
+            }
+        }
     }
 }
 
 @Composable
-private fun PumpButton(pumping: Boolean, onPumpingChange: (Boolean) -> Unit, modifier: Modifier = Modifier) {
+private fun PumpButton(pressed: Boolean, onPressChange: (Boolean) -> Unit, modifier: Modifier = Modifier) {
     val haptics = LocalHapticFeedback.current
-    val scale by animateFloatAsState(if (pumping) 0.9f else 1f, label = "buttonScale")
+    val currentOnPressChange by rememberUpdatedState(onPressChange)
+    val scale by animateFloatAsState(if (pressed) 0.9f else 1f, label = "buttonScale")
     Box(
         modifier
-            .clip(RoundedCornerShape(20.dp))
-            .background(Color.White.copy(alpha = 0.12f)),
-        contentAlignment = Alignment.Center,
-    ) {
-        Box(
-            Modifier
-                .size(116.dp)
-                .clip(CircleShape)
-                .background(ButtonTealDark.copy(alpha = 0.6f))
-                .padding(8.dp)
-                .scale(scale)
-                .clip(CircleShape)
-                .background(Brush.radialGradient(listOf(Color.White, ButtonTeal, ButtonTealDark)))
-                .pointerInput(Unit) {
-                    awaitEachGesture {
-                        awaitFirstDown()
-                        onPumpingChange(true)
-                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        waitForUpOrCancellation()
-                        onPumpingChange(false)
-                    }
-                },
-        )
-    }
+            .clip(CircleShape)
+            .background(ButtonTealDark.copy(alpha = 0.6f))
+            .padding(4.dp)
+            .scale(scale)
+            .clip(CircleShape)
+            .background(Brush.radialGradient(listOf(Color.White, ButtonTeal, ButtonTealDark)))
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    awaitFirstDown()
+                    currentOnPressChange(true)
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    waitForUpOrCancellation()
+                    currentOnPressChange(false)
+                }
+            },
+    )
 }
 
 @Composable
@@ -254,7 +384,8 @@ private fun Chamber(world: ChamberWorld, frame: () -> Long, modifier: Modifier =
         translate(offsetX, offsetY) {
             drawScenery(scale)
             drawParticles(world, scale)
-            drawJet(world, scale)
+            drawJets(world, scale)
+            world.layout.obstacle?.let { drawObstacle(it, scale) }
             drawCaughtRings(world, scale, frontHalf = false)
             world.pegs.forEach { drawPeg(it, scale) }
             drawCaughtRings(world, scale, frontHalf = true)
@@ -329,42 +460,60 @@ private fun DrawScope.drawParticles(world: ChamberWorld, scale: Float) {
     }
 }
 
-private fun DrawScope.drawJet(world: ChamberWorld, scale: Float) {
-    if (world.jet < 0.02f) return
-    val w = ChamberWorld.WIDTH * scale
-    val h = ChamberWorld.HEIGHT * scale
-    val path = Path().apply {
-        moveTo(w / 2f - 0.03f * scale, h)
-        lineTo(w / 2f - 0.25f * scale, h * 0.15f)
-        lineTo(w / 2f + 0.25f * scale, h * 0.15f)
-        lineTo(w / 2f + 0.03f * scale, h)
-        close()
+private fun DrawScope.drawJets(world: ChamberWorld, scale: Float) {
+    world.layout.jets.forEachIndexed { i, jet ->
+        val strength = world.jetStrengths.getOrElse(i) { 0f }
+        if (strength < 0.02f) return@forEachIndexed
+        // A widening cone from the nozzle along the jet direction.
+        val nozzle = Offset(jet.x * scale, jet.y * scale)
+        val dir = Offset(jet.dirX, jet.dirY)
+        val perp = Offset(-jet.dirY, jet.dirX)
+        val length = (if (jet.fromTop || jet.dirX != 0f) 1.0f else 1.25f) * scale
+        val far = nozzle + dir * length
+        val nearWidth = (if (jet.big) 0.03f else 0.02f) * scale
+        val farWidth = (if (jet.big) 0.25f else 0.18f) * scale
+        val path = Path().apply {
+            moveTo(nozzle.x - perp.x * nearWidth, nozzle.y - perp.y * nearWidth)
+            lineTo(far.x - perp.x * farWidth, far.y - perp.y * farWidth)
+            lineTo(far.x + perp.x * farWidth, far.y + perp.y * farWidth)
+            lineTo(nozzle.x + perp.x * nearWidth, nozzle.y + perp.y * nearWidth)
+            close()
+        }
+        drawPath(
+            path,
+            Brush.linearGradient(
+                listOf(Color.White.copy(alpha = 0.22f * strength), Color.Transparent),
+                start = nozzle,
+                end = far,
+            ),
+        )
     }
-    drawPath(
-        path,
-        Brush.verticalGradient(
-            listOf(Color.Transparent, Color.White.copy(alpha = 0.22f * world.jet)),
-            startY = h * 0.15f,
-            endY = h,
-        ),
-    )
+}
+
+private fun DrawScope.drawObstacle(obstacle: Obstacle, scale: Float) {
+    val center = Offset(obstacle.x * scale, obstacle.y * scale)
+    val r = obstacle.radius * scale
+    drawCircle(Color.White.copy(alpha = 0.4f), r, center)
+    drawCircle(Color.White.copy(alpha = 0.85f), r, center, style = Stroke(r * 0.12f))
+    drawCircle(Color.White.copy(alpha = 0.7f), r * 0.25f, center + Offset(-r * 0.35f, -r * 0.35f))
 }
 
 private fun DrawScope.drawPeg(peg: ChamberWorld.Peg, scale: Float) {
     val r = ChamberWorld.PEG_RADIUS * scale
     val x = peg.x * scale
-    val top = peg.tipY * scale
-    val bottom = peg.baseY * scale
-    // Mount below the peg.
+    val top = min(peg.tipY, peg.baseY) * scale
+    val bottom = max(peg.tipY, peg.baseY) * scale
+    // Mount beyond the base end of the peg.
+    val mountHeight = r * 9f
     drawRoundRect(
         Color.White.copy(alpha = 0.35f),
-        topLeft = Offset(x - r * 3f, bottom),
-        size = Size(r * 6f, r * 9f),
+        topLeft = Offset(x - r * 3f, if (peg.sink > 0f) bottom else top - mountHeight),
+        size = Size(r * 6f, mountHeight),
         cornerRadius = CornerRadius(r * 2f),
     )
     drawRoundRect(
         Color.White.copy(alpha = 0.55f),
-        topLeft = Offset(x - r, top - r),
+        topLeft = Offset(x - r, if (peg.sink > 0f) top - r else top),
         size = Size(r * 2f, bottom - top + r),
         cornerRadius = CornerRadius(r),
     )
