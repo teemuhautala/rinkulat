@@ -45,3 +45,4 @@ Buttons accumulate: each level keeps the previous jets unchanged (position and d
 | 10 | as 5 | upside down + obstacle + split current (top right, bottom left) |
 
 Upside down only flips the vertical gravity component, so left/right tilt still behaves intuitively. Swipe the chamber left/right during play to jump between levels (play-testing aid). In free play this keeps 10 rings; in challenge it uses the level's real rings/time and turns the run into an unsaved practice run.
+# rinkulat
