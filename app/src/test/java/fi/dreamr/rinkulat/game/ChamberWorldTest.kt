@@ -35,7 +35,7 @@ class ChamberWorldTest {
     @Test
     fun upsideDownRingsRiseToTheCeiling() {
         val world = ChamberWorld(ringCount = 1, random = Random(21))
-        world.reset(1, Tiers.layoutFor(8))
+        world.reset(1, Tiers.layoutFor(13).copy(weightless = false))
         val ring = world.rings.single()
         ring.x = 0.08f // Clear of pegs and obstacle.
         ring.y = ChamberWorld.HEIGHT / 2f
@@ -46,7 +46,7 @@ class ChamberWorldTest {
     @Test
     fun upsideDownPegCatchesRisingRingAndStacksTowardItsBase() {
         val world = ChamberWorld(ringCount = 1, random = Random(22))
-        world.reset(1, Tiers.layoutFor(8))
+        world.reset(1, Tiers.layoutFor(13).copy(weightless = false))
         val peg = world.pegs[0]
         assertTrue("tip hangs below base", peg.tipY > peg.baseY)
         val ring = world.rings.single()
@@ -61,10 +61,98 @@ class ChamberWorldTest {
     }
 
     @Test
+    fun weightlessRingsDriftSlowlyButStillSettleOnPegs() {
+        val normal = ChamberWorld(ringCount = 1, random = Random(26))
+        val floating = ChamberWorld(ringCount = 1, random = Random(26))
+        floating.reset(1, Tiers.layoutFor(11))
+        assertTrue(floating.layout.weightless)
+        for (world in listOf(normal, floating)) {
+            world.rings.single().apply { x = 0.08f; y = 0.3f; vx = 0f; vy = 0f }
+            world.run(0.5f)
+        }
+        val fell = normal.rings.single().y - 0.3f
+        val drifted = floating.rings.single().y - 0.3f
+        assertTrue("normal fell $fell, weightless drifted $drifted", drifted < fell * 0.4f)
+
+        // A flat ring dropped onto a peg still slides down and settles, so the level can be won.
+        val peg = floating.pegs[0]
+        floating.rings.single().apply { x = peg.x; y = peg.tipY - 0.05f; vx = 0f; vy = 0.3f; phi = (PI / 2).toFloat(); roll = 0f }
+        floating.run(15f)
+        assertTrue(floating.rings.single().isCaught)
+        assertTrue(floating.won)
+    }
+
+    @Test
+    fun shakesPushRingsAgainstTheMotionAndHarderInStrongChapters() {
+        fun push(multiplier: Float): Float {
+            val world = ChamberWorld(ringCount = 1, random = Random(27))
+            world.shakeMultiplier = multiplier
+            val ring = world.rings.single().apply { x = 0.5f; y = 0.4f; vx = 0f; vy = 0f }
+            world.shakeX = 1f // Phone jerked to the right.
+            world.run(0.15f, gy = 0f)
+            return ring.x - 0.5f
+        }
+        val normal = push(1f)
+        val strong = push(Tiers.shakeFor(11))
+        assertTrue("normal moved $normal", normal < -0.003f)
+        assertTrue("strong moved $strong vs $normal", strong < normal * 1.8f)
+        assertEquals(1f, Tiers.shakeFor(10), 0f)
+    }
+
+    @Test
+    fun attractingObstaclesPullOnlyNearbyRings() {
+        val world = ChamberWorld(ringCount = 1, random = Random(28))
+        world.reset(1, Tiers.layoutFor(12))
+        val obstacle = world.layout.obstacles.single()
+        val ring = world.rings.single()
+        val out = FloatArray(2)
+        // Just right of the obstacle: pulled left, weaker than gravity so jets and tilt can free it.
+        ring.x = obstacle.x + obstacle.radius + 0.02f; ring.y = obstacle.y
+        world.obstaclePull(ring, obstacle, out)
+        assertTrue("pull ${out[0]}", out[0] < -0.5f)
+        assertTrue(-out[0] < ChamberWorld.EFFECTIVE_GRAVITY * 1.5f)
+        // Out of reach: nothing.
+        ring.x = obstacle.x + obstacle.radius + ChamberWorld.ATTRACT_REACH + 0.01f
+        world.obstaclePull(ring, obstacle, out)
+        assertEquals(0f, out[0], 0f)
+
+        // A ring drifting past with no gravity bends toward the obstacle.
+        fun passBy(layout: LevelLayout): Float {
+            val w = ChamberWorld(ringCount = 1, random = Random(29))
+            w.reset(1, layout)
+            val r = w.rings.single().apply { x = obstacle.x + 0.15f; y = obstacle.y + 0.15f; vx = 0f; vy = -0.4f }
+            w.run(0.6f, gy = 0f)
+            return r.x
+        }
+        val pulled = passBy(world.layout)
+        val plain = passBy(world.layout.copy(attractingObstacles = false))
+        assertTrue("pulled x $pulled vs plain $plain", pulled < plain - 0.02f)
+    }
+
+    @Test
+    fun wormholesCarryRingsAcrossKeepingVelocity() {
+        val world = ChamberWorld(ringCount = 1, random = Random(30))
+        val layout = Tiers.layoutFor(15)
+        val (a, b) = layout.wormholes!!
+        // No jets, gravity, obstacles or turbulence-free flow needed: just a ring flying straight into mouth A.
+        world.reset(1, layout.copy(obstacles = emptyList()))
+        val ring = world.rings.single().apply { x = a.x - a.radius - 0.01f; y = a.y; vx = 1.5f; vy = 0f }
+        world.step(1f / 120f, 0f, 0f, pumping = false)
+        world.step(1f / 120f, 0f, 0f, pumping = false)
+        // Came out of B, on the far side, still heading right at (almost) the same speed.
+        assertTrue("x ${ring.x} y ${ring.y}", kotlin.math.abs(ring.y - b.y) < b.radius && ring.x >= b.x)
+        assertTrue("vx ${ring.vx}", ring.vx > 1.3f)
+        // It keeps going and doesn't bounce back through.
+        repeat(6) { world.step(1f / 120f, 0f, 0f, pumping = false) }
+        assertTrue("ring went back to ${ring.y}", kotlin.math.abs(ring.y - b.y) < 0.1f)
+        assertTrue(ring.x > b.x + b.radius)
+    }
+
+    @Test
     fun obstacleKeepsRingsOut() {
         val world = ChamberWorld(ringCount = 1, random = Random(23))
         world.reset(1, Tiers.layoutFor(6))
-        val obstacle = world.layout.obstacle!!
+        val obstacle = world.layout.obstacles.single()
         val ring = world.rings.single()
         ring.x = obstacle.x + 0.01f
         ring.y = obstacle.y - 0.3f
@@ -78,7 +166,7 @@ class ChamberWorldTest {
     @Test
     fun rightCurrentCarriesRingsRight() {
         val world = ChamberWorld(ringCount = 1, random = Random(24))
-        world.reset(1, LevelLayout("test", LevelLayout.CLASSIC.jets, current = Current.Right))
+        world.reset(1, LevelLayout(0, "test", LevelLayout.CLASSIC.jets, current = Current.Right))
         val ring = world.rings.single()
         ring.x = 0.2f
         ring.y = 0.2f

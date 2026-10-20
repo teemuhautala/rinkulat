@@ -1,8 +1,27 @@
 # Last session
 
-**Date:** 11.10.2026
+**Date:** 20.10.2026
 
 **What changed:**
+Level 15 is now "Wormholes": the center planet became a wormhole mouth at (0.5, 1.0) with its twin mirrored to (0.5, 0.5), on the other side of the pegs. Rings entering one mouth exit the other with unchanged velocity (`ChamberWorld.travelThrough`, `Ring.wormholeExit` prevents bouncing back). The two side planets stay. Levels 12–15 were also made weightless like level 11 earlier in the day.
+
+Levels 12–15 no longer have currents; their obstacles now attract nearby free rings like small planets (`LevelLayout.attractingObstacles`, `ChamberWorld.obstaclePull`, `ATTRACT_ACCEL` 1.4 / `ATTRACT_REACH` 0.18), drawn with a faint halo. Follow-up: level 12 switched to normal gravity and level 14 got two attracting obstacles, so 12–15 are all distinct again (12 normal + 1, 13 upside down + 1, 14 upside down + 2, 15 upside down + 3). Then 12–15 were made weightless like 11 (same `WEIGHTLESS_GRAVITY`).
+
+Shakes and nudges now move the rings: `TiltReading` also carries device linear acceleration (`shakeX/Y`), which `ChamberWorld` applies opposite to the motion. Strength is `SHAKE_RESPONSE` (0.6) × the chapter's `shake` multiplier (1 for levels 1–10, 2.5 for 11–15). Previously nothing reacted to shakes; only the smoothed gravity sensor was read.
+
+Level 11 is now a weightless level (normal orientation, full jets, gravity scaled to `WEIGHTLESS_GRAVITY` = 0.12 of the tilt reading so rings float but tilt still steers them and caught rings still settle). The upside-down levels moved up to 12–15 and the old level 15 was dropped.
+
+Earlier (16.10.2026):
+Map extended to 15 levels. Levels 8–10 are now normal-gravity three-obstacle levels (plain, + current right, + split currents); the upside-down levels moved to chapter 3 (11–13) with two new ones (14: three hanging obstacles + current left, 15: + split currents). Chapter 3 uses a new space theme (starfield, ringed planet, moon) and 10 rings / 2:30. `LevelLayout.obstacle` became `obstacles: List<Obstacle>`.
+
+Earlier (15.10.2026):
+High-score names: when a score places, the result card shows a name field prefilled with the last name used (`player_name`); the name is saved onto the entry when the player leaves the card. Score lines now have a 4th name field (old 3-field lines still decode). Free-play times are kept as a top 10 per level, and the Scores free-play tab has ‹ Level N › arrows.
+
+Progression rework. Levels now carry a map `number` in `LevelLayout.LEVELS`; theme, rings and time come from the 5-level chapter the number falls in (`Tiers.CHAPTERS`), so moving a level is a number change. Rings go 5→10 (+1 per level, then held at 10), time 1:00 → 2:30 (+10 s per level); defaults 10 rings / 2:30 past the defined chapters. Levels 6–10 use a new blue sea theme (colors, buttons, seaweed/starfish/shell, light rays); the theme also tints the HUD and cards.
+
+Challenge runs start from an unlocked checkpoint (1, 6, …) chosen with arrows under the Challenge button. Reaching a level unlocks it (stored as `highest_level_reached`). Free play opens a level grid showing locks and best time per level (`free_play_best`); debug builds can start locked levels. Level swiping is now debug-only.
+
+Previous session (11.10.2026):
 Swiping the chamber now also changes level in challenge mode (play-testing aid): it jumps straight into the level with its real ring count and time. A run that used swiping is a practice run and its score isn't saved.
 
 Menu card removed: the app opens on the toy with Challenge (formerly Tiers) and Free play buttons and a scores (star) icon in the top bar; the home icon returns there. Cards, scores and the top bar use the toy's orange gradient and case edge. `GameMode.Tiers` was renamed `GameMode.Challenge`; the SharedPreferences key `tier_scores` is unchanged so saved scores survive.
@@ -22,7 +41,7 @@ Added a start menu with two modes. Tiers: level 1 has 5 rings and 60 s, each lev
 Earlier in the day: project created; extra idle tumbling; peg friction; second (roll) tumble axis with position-dependent jet spin; free-play timer starts at first caught ring. The clock now stops only when every caught ring has settled onto its stack.
 
 **Verification performed:**
-- `env -u ANDROID_SDK_ROOT ./gradlew test assembleDebug` — 25/25 unit tests pass.
+- `env -u ANDROID_SDK_ROOT ./gradlew test assembleDebug` — 34/34 unit tests pass.
 - `env -u ANDROID_SDK_ROOT ~/bin/build_apk.sh` — signed debug APK at `build_output/Rinkulat-debug.apk`.
 - Not yet play-tested on a device.
 

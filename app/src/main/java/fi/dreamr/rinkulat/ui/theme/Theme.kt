@@ -3,7 +3,9 @@ package fi.dreamr.rinkulat.ui.theme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import fi.dreamr.rinkulat.game.ThemeId
 
 val Backdrop = Color(0xFF1B1A2E)
 val CaseEdge = Color(0xFFE8EEF5)
@@ -21,6 +23,59 @@ val RingColors = listOf(
     Color(0xFF4FC9E8), // sky blue
     Color(0xFFB98CF5), // lilac
 )
+
+enum class Scenery { Garden, Sea, Space }
+
+/** Colors and decoration of the toy for one chapter of levels. */
+data class ToyTheme(
+    val liquidTop: Color,
+    val liquidBottom: Color,
+    val button: Color,
+    val buttonDark: Color,
+    val buttonText: Color,
+    /** Floating specks in the liquid. */
+    val particle: Color,
+    val scenery: Scenery,
+)
+
+private val OrangeTheme = ToyTheme(
+    liquidTop = LiquidTop,
+    liquidBottom = LiquidBottom,
+    button = ButtonTeal,
+    buttonDark = ButtonTealDark,
+    buttonText = Color(0xFF0F3F3B),
+    particle = Color(0xFFFFF3B0),
+    scenery = Scenery.Garden,
+)
+
+private val SeaTheme = ToyTheme(
+    liquidTop = Color(0xFF5CC6EE),
+    liquidBottom = Color(0xFF1B4E9B),
+    button = Color(0xFFFFC94D),
+    buttonDark = Color(0xFFE8833A),
+    buttonText = Color(0xFF5A2A00),
+    particle = Color(0xFFD8F6FF),
+    scenery = Scenery.Sea,
+)
+
+private val SpaceTheme = ToyTheme(
+    liquidTop = Color(0xFF3A2C78),
+    liquidBottom = Color(0xFF0E0B2A),
+    button = Color(0xFFE59BFF),
+    buttonDark = Color(0xFF8E4FD6),
+    buttonText = Color(0xFF2A0B45),
+    particle = Color(0xFFFFFFFF),
+    scenery = Scenery.Space,
+)
+
+fun toyThemeFor(id: ThemeId) = when (id) {
+    ThemeId.Orange -> OrangeTheme
+    ThemeId.Sea -> SeaTheme
+    ThemeId.Space -> SpaceTheme
+}
+
+/** Theme of the chapter currently shown. */
+val LocalToyTheme = staticCompositionLocalOf { OrangeTheme }
 
 @Composable
 fun RinkulatTheme(content: @Composable () -> Unit) {

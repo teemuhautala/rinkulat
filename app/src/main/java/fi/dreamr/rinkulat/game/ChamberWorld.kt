@@ -46,6 +46,9 @@ class ChamberWorld(
 
         val isCaught get() = peg >= 0
 
+        /** Wormhole mouth the ring just came out of; it can't re-enter until it has left that mouth. */
+        var wormholeExit: Wormhole? = null
+
         /** True while caught and resting on the peg base or on the ring below. */
         var settled = false
     }
@@ -98,6 +101,13 @@ class ChamberWorld(
     private var time = 0f
     private var accumulator = 0f
 
+    /** Device acceleration (shakes, nudges) in g units, screen axes, set each frame before [advance]. */
+    var shakeX = 0f
+    var shakeY = 0f
+
+    /** How strongly rings react to [shakeX]/[shakeY]; set per chapter (1 = normal). */
+    var shakeMultiplier = 1f
+
     /** Advance by a frame of [frameDt] seconds using fixed sub-steps. Gravity is in g units, screen axes. */
     fun advance(frameDt: Float, gravityX: Float, gravityY: Float, pressedJets: Int) {
         accumulator += min(frameDt, MAX_FRAME_DT)
@@ -131,8 +141,13 @@ class ChamberWorld(
             jet = max(jet, jetStrengths[i])
         }
 
-        val gx = gravityX * EFFECTIVE_GRAVITY
-        val gy = gravityY * EFFECTIVE_GRAVITY * if (layout.upsideDown) -1f else 1f
+        // Weightless levels keep a faint pull so tilting still steers rings and caught rings still settle.
+        val g = EFFECTIVE_GRAVITY * if (layout.weightless) WEIGHTLESS_GRAVITY else 1f
+        // Shaking the phone moves the case; rings lag behind, i.e. are pushed opposite to the motion.
+        // That's real-world motion, so it is neither flipped upside down nor weakened when weightless.
+        val shake = EFFECTIVE_GRAVITY * SHAKE_RESPONSE * shakeMultiplier
+        val gx = gravityX * g - shakeX * shake
+        val gy = gravityY * g * (if (layout.upsideDown) -1f else 1f) - shakeY * shake
 
         for (ring in rings) {
             if (ring.isCaught) stepCaught(ring, dt, gy) else stepFree(ring, dt, gx, gy)
@@ -214,6 +229,7 @@ class ChamberWorld(
 
     private val flow = FloatArray(2)
     private val flowSide = FloatArray(2)
+    private val pull = FloatArray(2)
     private val spin = FloatArray(2)
 
     private fun stepFree(ring: Ring, dt: Float, gx: Float, gy: Float) {
@@ -222,10 +238,20 @@ class ChamberWorld(
         // A ring lying flat presents its broad side to vertical motion.
         val dragY = DRAG * (0.5f + 0.9f * flat)
         val dragX = DRAG * 0.7f
-        ring.vx += (dragX * (flow[0] - ring.vx) + gx) * dt
-        ring.vy += (dragY * (flow[1] - ring.vy) + gy) * dt
+        var ax = gx
+        var ay = gy
+        if (layout.attractingObstacles) {
+            for (obstacle in layout.obstacles) {
+                obstaclePull(ring, obstacle, pull)
+                ax += pull[0]
+                ay += pull[1]
+            }
+        }
+        ring.vx += (dragX * (flow[0] - ring.vx) + ax) * dt
+        ring.vy += (dragY * (flow[1] - ring.vy) + ay) * dt
         ring.x += ring.vx * dt
         ring.y += ring.vy * dt
+        layout.wormholes?.let { travelThrough(ring, it) }
 
         // Shear in the flow spins the ring, falling rings drift toward lying flat, plus random wobble.
         flowAt(ring.x + 0.02f, ring.y, flowSide)
@@ -258,8 +284,56 @@ class ChamberWorld(
                 val cy = ring.y.coerceIn(min(peg.tipY, peg.baseY), max(peg.tipY, peg.baseY))
                 pushOut(ring, peg.x, cy, PEG_RADIUS, onTip = cy == peg.tipY)
             }
-            layout.obstacle?.let { pushOut(ring, it.x, it.y, it.radius, onTip = true) }
+            layout.obstacles.forEach { pushOut(ring, it.x, it.y, it.radius, onTip = true) }
         }
+    }
+
+    /**
+     * Wormholes: a ring whose center gets inside one mouth reappears at the other with the same velocity.
+     * It is placed on the opposite side of the exit mouth from where it entered, so it carries on out
+     * in its direction of travel, and can't re-enter until it has cleared the exit.
+     */
+    private fun travelThrough(ring: Ring, pair: Pair<Wormhole, Wormhole>) {
+        val exit = ring.wormholeExit
+        if (exit != null) {
+            if (inside(ring, exit)) return
+            ring.wormholeExit = null
+        }
+        val (entry, target) = when {
+            inside(ring, pair.first) -> pair.first to pair.second
+            inside(ring, pair.second) -> pair.second to pair.first
+            else -> return
+        }
+        ring.x = target.x - (ring.x - entry.x)
+        ring.y = target.y - (ring.y - entry.y)
+        ring.wormholeExit = target
+    }
+
+    private fun inside(ring: Ring, hole: Wormhole): Boolean {
+        val dx = ring.x - hole.x
+        val dy = ring.y - hole.y
+        return dx * dx + dy * dy < hole.radius * hole.radius
+    }
+
+    /** Seconds simulated since creation; drives animated decorations like the wormhole swirl. */
+    val clock get() = time
+
+    /**
+     * Pull of an attracting obstacle on a free ring, into [out]. Zero beyond [ATTRACT_REACH] from the
+     * obstacle's surface, growing linearly to [ATTRACT_ACCEL] at contact: enough to bend a passing ring's
+     * path, weak enough that a jet or a tilt frees a ring resting against it.
+     */
+    internal fun obstaclePull(ring: Ring, obstacle: Obstacle, out: FloatArray) {
+        out[0] = 0f
+        out[1] = 0f
+        val dx = obstacle.x - ring.x
+        val dy = obstacle.y - ring.y
+        val dist = sqrt(dx * dx + dy * dy)
+        val gap = dist - obstacle.radius
+        if (gap >= ATTRACT_REACH || dist < 1e-4f) return
+        val strength = ATTRACT_ACCEL * (1f - gap.coerceAtLeast(0f) / ATTRACT_REACH)
+        out[0] = dx / dist * strength
+        out[1] = dy / dist * strength
     }
 
     private fun tryCatch(ring: Ring) {
@@ -555,6 +629,16 @@ class ChamberWorld(
 
         // Tuning: rings.
         const val EFFECTIVE_GRAVITY = 1.1f
+
+        /** Fraction of the device's acceleration passed on to the rings (before the chapter multiplier). */
+        const val SHAKE_RESPONSE = 0.6f
+
+        /** Attracting obstacles: pull at contact (world units/s², gravity is [EFFECTIVE_GRAVITY]) and reach from the surface. */
+        const val ATTRACT_ACCEL = 1.4f
+        const val ATTRACT_REACH = 0.18f
+
+        /** Fraction of gravity left on weightless levels. */
+        const val WEIGHTLESS_GRAVITY = 0.12f
         const val DRAG = 4f
         const val TUMBLE_SHEAR = 0.6f
         const val FLATTEN_TORQUE = 2.5f

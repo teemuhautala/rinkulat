@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -68,17 +69,18 @@ import fi.dreamr.rinkulat.game.HudState
 import fi.dreamr.rinkulat.game.Jet
 import fi.dreamr.rinkulat.game.LevelLayout
 import fi.dreamr.rinkulat.game.Obstacle
+import fi.dreamr.rinkulat.game.Wormhole
 import fi.dreamr.rinkulat.game.GameViewModel
 import fi.dreamr.rinkulat.game.rememberTiltReading
 import fi.dreamr.rinkulat.ui.theme.Backdrop
-import fi.dreamr.rinkulat.ui.theme.ButtonTeal
-import fi.dreamr.rinkulat.ui.theme.ButtonTealDark
 import fi.dreamr.rinkulat.ui.theme.CaseEdge
 import fi.dreamr.rinkulat.ui.theme.FlowerRed
 import fi.dreamr.rinkulat.ui.theme.LeafGreen
-import fi.dreamr.rinkulat.ui.theme.LiquidBottom
-import fi.dreamr.rinkulat.ui.theme.LiquidTop
+import fi.dreamr.rinkulat.ui.theme.LocalToyTheme
 import fi.dreamr.rinkulat.ui.theme.RingColors
+import fi.dreamr.rinkulat.ui.theme.Scenery
+import fi.dreamr.rinkulat.ui.theme.ToyTheme
+import fi.dreamr.rinkulat.ui.theme.toyThemeFor
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
@@ -100,11 +102,23 @@ fun RinkulatScreen(viewModel: GameViewModel = viewModel()) {
             withFrameNanos { now ->
                 val dt = if (last == 0L) 0f else (now - last) / 1_000_000_000f
                 last = now
-                viewModel.advance(dt, tilt.x, tilt.y, pressedJets.intValue)
+                viewModel.advance(dt, tilt.x, tilt.y, pressedJets.intValue, tilt.shakeX, tilt.shakeY)
             }
         }
     }
 
+    CompositionLocalProvider(LocalToyTheme provides toyThemeFor(viewModel.themeId)) {
+        GameContent(viewModel, pressedJets.intValue) { jet, down ->
+            val bit = 1 shl jet
+            pressedJets.intValue = if (down) pressedJets.intValue or bit else pressedJets.intValue and bit.inv()
+        }
+    }
+}
+
+@Composable
+private fun GameContent(viewModel: GameViewModel, pressedJets: Int, onJetPressChange: (jet: Int, down: Boolean) -> Unit) {
+    val phase = viewModel.phase
+    val atStart = phase == GamePhase.Menu || phase == GamePhase.LevelSelect
     Box(
         Modifier
             .fillMaxSize()
@@ -119,7 +133,7 @@ fun RinkulatScreen(viewModel: GameViewModel = viewModel()) {
         ) {
             Hud(
                 state = viewModel.hud,
-                atStart = viewModel.phase == GamePhase.Menu,
+                atStart = atStart,
                 showRestart = viewModel.mode == GameMode.FreePlay && viewModel.phase == GamePhase.Playing,
                 onRestart = viewModel::startFreePlay,
                 onHome = viewModel::openMenu,
@@ -130,23 +144,38 @@ fun RinkulatScreen(viewModel: GameViewModel = viewModel()) {
                 world = viewModel.world,
                 layout = viewModel.layout,
                 frame = { viewModel.frame },
-                pressedJets = pressedJets.intValue,
+                pressedJets = pressedJets,
                 onSwipe = if (viewModel.hud.canSwipeLevels) viewModel::changeLevel else null,
-                onJetPressChange = { jet, down ->
-                    val bit = 1 shl jet
-                    pressedJets.intValue = if (down) pressedJets.intValue or bit else pressedJets.intValue and bit.inv()
-                },
+                onJetPressChange = onJetPressChange,
                 modifier = Modifier.weight(1f),
             )
         }
-        if (viewModel.phase == GamePhase.Menu && !viewModel.scoresVisible) {
-            StartButtons(onChallenge = viewModel::startChallenge, onFreePlay = viewModel::startFreePlay)
+        if (phase == GamePhase.Menu && !viewModel.scoresVisible) {
+            StartButtons(
+                challengeStart = viewModel.challengeStart,
+                canChangeCheckpoint = viewModel.selectableCheckpoints.size > 1,
+                onChangeCheckpoint = viewModel::changeCheckpoint,
+                onChallenge = viewModel::startChallenge,
+                onFreePlay = viewModel::openLevelSelect,
+            )
+        }
+        if (phase == GamePhase.LevelSelect) {
+            LevelSelectOverlay(
+                tiles = viewModel.levelTiles,
+                allowLocked = viewModel.isDebug,
+                onPick = viewModel::pickFreePlayLevel,
+                onClose = viewModel::openMenu,
+            )
         }
         PhaseOverlay(
-            phase = viewModel.phase,
+            phase = phase,
             onBeginLevel = viewModel::beginLevel,
             onNextLevel = viewModel::nextLevel,
             onPlayAgain = viewModel::playAgain,
+            onChooseLevel = viewModel::openLevelSelect,
+            namingEntry = viewModel.namingEntry,
+            playerName = viewModel.playerName,
+            onNameChange = viewModel::updatePlayerName,
             onScores = { viewModel.showScores() },
             onQuit = viewModel::openMenu,
         )
@@ -155,8 +184,10 @@ fun RinkulatScreen(viewModel: GameViewModel = viewModel()) {
                 tab = viewModel.scoresTab,
                 challengeScores = viewModel.challengeScores,
                 freePlayTimes = viewModel.freePlayTimes,
+                freePlayLevel = viewModel.scoresLevel,
                 latestEntry = viewModel.latestEntry,
                 onTabChange = viewModel::showScores,
+                onFreePlayLevelChange = viewModel::changeScoresLevel,
                 onClose = viewModel::hideScores,
             )
         }
@@ -247,6 +278,7 @@ private fun ToyCase(
     modifier: Modifier = Modifier,
 ) {
     val caseShape = RoundedCornerShape(36.dp)
+    val theme = LocalToyTheme.current
     val indexedJets = layout.jets.withIndex().toList()
     val topJets = indexedJets.filter { it.value.fromTop }
     val bottomJets = indexedJets.filterNot { it.value.fromTop }
@@ -267,7 +299,7 @@ private fun ToyCase(
             .widthIn(max = 480.dp)
             .fillMaxWidth()
             .clip(caseShape)
-            .background(Brush.verticalGradient(listOf(LiquidTop, LiquidBottom)))
+            .background(Brush.verticalGradient(listOf(theme.liquidTop, theme.liquidBottom)))
             .border(6.dp, CaseEdge.copy(alpha = 0.7f), caseShape)
             .padding(14.dp),
     ) {
@@ -282,6 +314,7 @@ private fun ToyCase(
         ) {
             Chamber(
                 world = world,
+                theme = theme,
                 frame = frame,
                 modifier = Modifier
                     .aspectRatio(ChamberWorld.WIDTH / ChamberWorld.HEIGHT, matchHeightConstraintsFirst = true)
@@ -352,14 +385,15 @@ private fun PumpButton(pressed: Boolean, onPressChange: (Boolean) -> Unit, modif
     val haptics = LocalHapticFeedback.current
     val currentOnPressChange by rememberUpdatedState(onPressChange)
     val scale by animateFloatAsState(if (pressed) 0.9f else 1f, label = "buttonScale")
+    val theme = LocalToyTheme.current
     Box(
         modifier
             .clip(CircleShape)
-            .background(ButtonTealDark.copy(alpha = 0.6f))
+            .background(theme.buttonDark.copy(alpha = 0.6f))
             .padding(4.dp)
             .scale(scale)
             .clip(CircleShape)
-            .background(Brush.radialGradient(listOf(Color.White, ButtonTeal, ButtonTealDark)))
+            .background(Brush.radialGradient(listOf(Color.White, theme.button, theme.buttonDark)))
             .pointerInput(Unit) {
                 awaitEachGesture {
                     awaitFirstDown()
@@ -373,19 +407,28 @@ private fun PumpButton(pressed: Boolean, onPressChange: (Boolean) -> Unit, modif
 }
 
 @Composable
-private fun Chamber(world: ChamberWorld, frame: () -> Long, modifier: Modifier = Modifier) {
+private fun Chamber(world: ChamberWorld, theme: ToyTheme, frame: () -> Long, modifier: Modifier = Modifier) {
     Canvas(modifier) {
         frame() // Read to redraw every simulated frame.
         val scale = min(size.width / ChamberWorld.WIDTH, size.height / ChamberWorld.HEIGHT)
         val offsetX = (size.width - ChamberWorld.WIDTH * scale) / 2f
         val offsetY = size.height - ChamberWorld.HEIGHT * scale
 
-        drawRect(Brush.verticalGradient(listOf(LiquidTop.copy(alpha = 0.85f), LiquidBottom)))
+        drawRect(Brush.verticalGradient(listOf(theme.liquidTop.copy(alpha = 0.85f), theme.liquidBottom)))
         translate(offsetX, offsetY) {
-            drawScenery(scale)
-            drawParticles(world, scale)
+            when (theme.scenery) {
+                Scenery.Garden -> drawGardenScenery(scale)
+                Scenery.Sea -> drawSeaScenery(scale)
+                Scenery.Space -> drawSpaceScenery(scale)
+            }
+            drawParticles(world, theme.particle, scale)
             drawJets(world, scale)
-            world.layout.obstacle?.let { drawObstacle(it, scale) }
+            world.layout.obstacles.forEach { drawObstacle(it, scale, world.layout.attractingObstacles) }
+            world.layout.wormholes?.let { (a, b) ->
+                // The two mouths swirl in opposite directions: in one, out the other.
+                drawWormhole(a, scale, world.clock)
+                drawWormhole(b, scale, -world.clock)
+            }
             drawCaughtRings(world, scale, frontHalf = false)
             world.pegs.forEach { drawPeg(it, scale) }
             drawCaughtRings(world, scale, frontHalf = true)
@@ -404,7 +447,7 @@ private fun Chamber(world: ChamberWorld, frame: () -> Long, modifier: Modifier =
 
 private enum class Arc { Full, Back, Front }
 
-private fun DrawScope.drawScenery(scale: Float) {
+private fun DrawScope.drawGardenScenery(scale: Float) {
     val w = ChamberWorld.WIDTH * scale
     val h = ChamberWorld.HEIGHT * scale
     // Simple leaves rising from the bottom corners.
@@ -449,13 +492,120 @@ private fun DrawScope.drawFlower(center: Offset, radius: Float) {
     drawCircle(Color(0xFFFFE07A).copy(alpha = 0.6f), radius * 0.3f, center)
 }
 
-private fun DrawScope.drawParticles(world: ChamberWorld, scale: Float) {
+/** Blue water chapter: light rays from the surface, seaweed from the floor, a starfish and a shell. */
+private fun DrawScope.drawSeaScenery(scale: Float) {
+    val w = ChamberWorld.WIDTH * scale
+    val h = ChamberWorld.HEIGHT * scale
+    listOf(0.2f to 0.12f, 0.55f to 0.08f, 0.8f to 0.1f).forEach { (x, width) ->
+        val path = Path().apply {
+            moveTo((x - width / 2f) * w, 0f)
+            lineTo((x + width / 2f) * w, 0f)
+            lineTo((x + width) * w, h * 0.7f)
+            lineTo(x * w, h * 0.7f)
+            close()
+        }
+        drawPath(
+            path,
+            Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.14f), Color.Transparent), endY = h * 0.7f),
+        )
+    }
+    listOf(
+        Triple(0.07f, 0.42f, 0f),
+        Triple(0.15f, 0.3f, 1.3f),
+        Triple(0.86f, 0.38f, 2.1f),
+        Triple(0.93f, 0.26f, 0.7f),
+    ).forEach { (x, height, phase) -> drawSeaweed(Offset(x * w, h), height * scale, phase) }
+    drawStarfish(Offset(w * 0.3f, h - scale * 0.03f), scale * 0.045f)
+    drawShell(Offset(w * 0.7f, h - scale * 0.025f), scale * 0.035f)
+}
+
+/** Space chapter: a starfield, a ringed planet and a small moon. Fixed positions so it doesn't flicker. */
+private fun DrawScope.drawSpaceScenery(scale: Float) {
+    val w = ChamberWorld.WIDTH * scale
+    val h = ChamberWorld.HEIGHT * scale
+    val stars = kotlin.random.Random(7)
+    repeat(45) {
+        val size = scale * (0.002f + stars.nextFloat() * 0.005f)
+        drawCircle(Color.White.copy(alpha = 0.3f + stars.nextFloat() * 0.5f), size, Offset(stars.nextFloat() * w, stars.nextFloat() * h))
+    }
+    // Ringed planet, low on the right.
+    val planet = Offset(w * 0.8f, h * 0.82f)
+    val r = scale * 0.11f
+    drawCircle(
+        Brush.radialGradient(listOf(Color(0xFFFFB27A), Color(0xFFB0457A)), center = planet - Offset(r * 0.4f, r * 0.4f), radius = r * 1.6f),
+        r,
+        planet,
+        alpha = 0.6f,
+    )
+    rotate(-18f, pivot = planet) {
+        drawOval(
+            Color(0xFFFFE1B5).copy(alpha = 0.45f),
+            topLeft = Offset(planet.x - r * 1.8f, planet.y - r * 0.35f),
+            size = Size(r * 3.6f, r * 0.7f),
+            style = Stroke(r * 0.12f),
+        )
+    }
+    // Small moon, high on the left.
+    val moon = Offset(w * 0.18f, h * 0.12f)
+    drawCircle(Color(0xFFDDE3F0).copy(alpha = 0.45f), scale * 0.045f, moon)
+    drawCircle(Color(0xFF9AA3B8).copy(alpha = 0.4f), scale * 0.01f, moon + Offset(scale * 0.012f, scale * 0.008f))
+}
+
+private val SeaweedGreen = Color(0xFF2E9E7A)
+
+private fun DrawScope.drawSeaweed(base: Offset, height: Float, phase: Float) {
+    val path = Path().apply {
+        moveTo(base.x, base.y)
+        val segments = 4
+        for (i in 1..segments) {
+            val y = base.y - height * i / segments
+            val sway = sin(phase + i * 1.4f) * height * 0.12f
+            quadraticTo(base.x + sway * 1.6f, y + height / segments / 2f, base.x + sway, y)
+        }
+    }
+    drawPath(path, SeaweedGreen.copy(alpha = 0.6f), style = Stroke(width = height * 0.07f))
+}
+
+private fun DrawScope.drawStarfish(center: Offset, radius: Float) {
+    val path = Path().apply {
+        for (i in 0 until 10) {
+            val a = -PI.toFloat() / 2f + i * PI.toFloat() / 5f
+            val r = if (i % 2 == 0) radius else radius * 0.45f
+            val point = Offset(center.x + cos(a) * r, center.y + sin(a) * r)
+            if (i == 0) moveTo(point.x, point.y) else lineTo(point.x, point.y)
+        }
+        close()
+    }
+    drawPath(path, Color(0xFFFF8A65).copy(alpha = 0.7f))
+}
+
+private fun DrawScope.drawShell(center: Offset, radius: Float) {
+    drawArc(
+        Color(0xFFFFE0C2).copy(alpha = 0.7f),
+        180f,
+        180f,
+        true,
+        Offset(center.x - radius, center.y - radius),
+        Size(radius * 2f, radius * 2f),
+    )
+    for (i in 1..4) {
+        val a = PI.toFloat() + i * PI.toFloat() / 5f
+        drawLine(
+            Color(0xFFC9906B).copy(alpha = 0.7f),
+            Offset(center.x, center.y),
+            Offset(center.x + cos(a) * radius, center.y + sin(a) * radius),
+            strokeWidth = radius * 0.08f,
+        )
+    }
+}
+
+private fun DrawScope.drawParticles(world: ChamberWorld, color: Color, scale: Float) {
     world.particles.forEach { p ->
         val center = Offset(p.x * scale, p.y * scale)
         if (p.isBubble) {
             drawCircle(Color.White.copy(alpha = 0.5f), p.size * scale * 1.6f, center, style = Stroke(1.5f))
         } else {
-            drawCircle(Color(0xFFFFF3B0).copy(alpha = 0.7f), p.size * scale * 0.6f, center)
+            drawCircle(color.copy(alpha = 0.7f), p.size * scale * 0.6f, center)
         }
     }
 }
@@ -490,9 +640,56 @@ private fun DrawScope.drawJets(world: ChamberWorld, scale: Float) {
     }
 }
 
-private fun DrawScope.drawObstacle(obstacle: Obstacle, scale: Float) {
+private fun DrawScope.drawWormhole(hole: Wormhole, scale: Float, time: Float) {
+    val center = Offset(hole.x * scale, hole.y * scale)
+    val r = hole.radius * scale
+    drawCircle(
+        Brush.radialGradient(
+            0f to Color.Black.copy(alpha = 0.85f),
+            0.6f to Color(0xFF5B2A9E).copy(alpha = 0.7f),
+            1f to Color(0xFFB58CFF).copy(alpha = 0.0f),
+            center = center,
+            radius = r * 1.3f,
+        ),
+        r * 1.3f,
+        center,
+    )
+    // Spiral arms turning with time.
+    rotate(time * 90f, pivot = center) {
+        for (i in 0 until 3) {
+            rotate(i * 120f, pivot = center) {
+                drawArc(
+                    Color(0xFFE2D1FF).copy(alpha = 0.55f),
+                    startAngle = 0f,
+                    sweepAngle = 110f,
+                    useCenter = false,
+                    topLeft = Offset(center.x - r * 0.75f, center.y - r * 0.45f),
+                    size = Size(r * 1.5f, r * 0.9f),
+                    style = Stroke(r * 0.08f),
+                )
+            }
+        }
+    }
+}
+
+private fun DrawScope.drawObstacle(obstacle: Obstacle, scale: Float, attracting: Boolean) {
     val center = Offset(obstacle.x * scale, obstacle.y * scale)
     val r = obstacle.radius * scale
+    if (attracting) {
+        // Faint halo out to the reach of the pull.
+        val reach = r + ChamberWorld.ATTRACT_REACH * scale
+        drawCircle(
+            Brush.radialGradient(
+                0f to Color.White.copy(alpha = 0.18f),
+                r / reach to Color.White.copy(alpha = 0.12f),
+                1f to Color.Transparent,
+                center = center,
+                radius = reach,
+            ),
+            reach,
+            center,
+        )
+    }
     drawCircle(Color.White.copy(alpha = 0.4f), r, center)
     drawCircle(Color.White.copy(alpha = 0.85f), r, center, style = Stroke(r * 0.12f))
     drawCircle(Color.White.copy(alpha = 0.7f), r * 0.25f, center + Offset(-r * 0.35f, -r * 0.35f))

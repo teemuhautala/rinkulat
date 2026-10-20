@@ -9,10 +9,11 @@ Package: `fi.dreamr.rinkulat` · single-module Compose app (`:app`), portrait on
 - `game/ChamberWorld.kt` — pure-Kotlin simulation (no Android dependencies, unit-tested). Holds rings, pegs, decorative particles, jet strength, timer and win state. All tuning constants live in its companion object.
 - `game/GameViewModel.kt` — owns the world, mode (free play / challenge) and phase state machine (start, level intro, playing, level complete, run over, free-play won), countdown, scoring and score lists; a `frame` counter drives canvas redraws.
 - `game/TiltSensor.kt` — `rememberTiltReading()`: gravity sensor (accelerometer fallback) converted to screen-axis gravity in g units.
-- `game/LevelLayout.kt` — per-level jets (nozzle + direction), obstacle, current and upside-down flag; `CLASSIC` for free play, `forTier(level)` for tiers.
-- `game/Tiers.kt` — challenge mode rules: rings/seconds per level, max level from `ChamberWorld.RING_CAPACITY`, level score.
-- `game/ScoreRepository.kt` — top-10 score lists (tier points, free-play times) stored in SharedPreferences `rinkulat_scores`.
-- `ui/GameOverlays.kt` — start buttons, toy-styled level/result cards, scores list.
+- `game/LevelLayout.kt` — level mechanics only: jets (nozzle + direction), obstacle, current and upside-down flag. `LEVELS` lists every level with its map `number`.
+- `game/Tiers.kt` — map rules: chapters of 5 levels (theme id, rings and seconds per level), checkpoints (1, 6, 11, …), level lookup by number, level score.
+- `game/ScoreRepository.kt` — SharedPreferences `rinkulat_scores`: top-10 lists with player names (challenge points; free-play times per level), last player name, highest level reached (unlocks) and best free-play time per level.
+- `ui/theme/Theme.kt` — `ToyTheme` per `ThemeId` (liquid, button, particle colors, scenery), provided through `LocalToyTheme`.
+- `ui/GameOverlays.kt` — start buttons with checkpoint selector, free-play level grid, toy-styled level/result cards, scores list.
 - `ui/RinkulatScreen.kt` — frame loop (`withFrameNanos`), HUD, toy case, chamber Canvas rendering, push button, win overlay.
 
 ## Physics notes
@@ -27,6 +28,24 @@ Package: `fi.dreamr.rinkulat` · single-module Compose app (`:app`), portrait on
 
 `env -u ANDROID_SDK_ROOT ./gradlew test assembleDebug`, then `~/bin/build_apk.sh` (output in `build_output/`).
 
+## Progression
+
+- **Challenge:** a run starts from a checkpoint (first level of a chapter: 1, 6, …), chosen with the arrows under the Challenge button once more than one is unlocked. Clearing a level unlocks the next one (not in practice runs).
+- **Free play:** opens a level grid; only levels reached in Challenge can be played (10 rings, timer from first catch). Tiles show the best time per level. Debug builds (`FLAG_DEBUGGABLE`) can start locked levels and swipe the chamber to change level.
+
+## Chapters
+
+| Levels | Theme | Rings | Time |
+|---|---|---|---|
+| 1–5 | Orange (garden) | 5, 6, 7, 8, 9 | 1:00 … 1:40 (+10 s/level) |
+| 6–10 | Sea (blue water, seaweed) | 10 | 1:50 … 2:30 |
+| 11–15 | Space (stars, planet) | 10 | 2:30 |
+| 16+ | last chapter's theme | 10 (default) | 2:30 (default) |
+
+Shakes and nudges push the rings opposite to the phone's motion; chapter 3 (11–15) reacts 2.5× stronger. Edit `Tiers.CHAPTERS` to change a chapter's theme, rings, times or shake strength.
+
+**Moving a level:** change its `number` in `LevelLayout.LEVELS` (e.g. swap 7 and 9 by editing both numbers). The theme, rings and time come from the chapter the number falls in. Numbers must run 1..N without gaps (unit-tested). Best free-play times are stored by number, so they stay with the number, not the layout.
+
 ## Challenge levels
 
 Buttons accumulate: each level keeps the previous jets unchanged (position and direction) and may add more. Both button strips (above and below the chamber) are always shown at the same size with 5 slots: corner, ¼, center, ¾, corner.
@@ -38,11 +57,20 @@ Buttons accumulate: each level keeps the previous jets unchanged (position and d
 | 3 | + top center (shoots down) | — |
 | 4 | + top ¼ and ¾, + bottom corners aimed at the chamber center | — |
 | 5 | + top corners aimed at the center (full set: 5 bottom + 5 top) | — |
-| 6 | as 5 | obstacle |
-| 7 | as 5 | obstacle + current right |
-| 8 | as 5 | upside down (pegs hang from above) + obstacle |
-| 9 | as 5 | upside down + obstacle + current left |
-| 10 | as 5 | upside down + obstacle + split current (top right, bottom left) |
+| 6 | full set | obstacle |
+| 7 | full set | obstacle + current right |
+| 8 | full set | three obstacles (center + two higher on the sides) |
+| 9 | full set | three obstacles + current right |
+| 10 | full set | three obstacles + split current (top right, bottom left) |
+| 11 | full set | weightless: rings float, moved by the jets, currents and a faint pull from tilting |
+| 12 | full set | weightless + attracting obstacle (normal orientation) |
+| 13 | full set | weightless + upside down (pegs hang from above) + attracting obstacle |
+| 14 | full set | weightless + upside down + two attracting obstacles (high on the sides) |
+| 15 | full set | weightless + upside down + two attracting side obstacles + wormhole pair (center, mirrored across the pegs) |
 
-Upside down only flips the vertical gravity component, so left/right tilt still behaves intuitively. Swipe the chamber left/right during play to jump between levels (play-testing aid). In free play this keeps 10 rings; in challenge it uses the level's real rings/time and turns the run into an unsaved practice run.
+Attracting obstacles (12–15) pull free rings within `ATTRACT_REACH` of their surface, up to `ATTRACT_ACCEL` at contact; a faint halo shows the range. The pull bends passing rings but jets free a ring resting against one.
+
+Wormholes (`LevelLayout.wormholes`, level 15) come in connected pairs: a free ring whose center enters one mouth reappears in the other with the same velocity, on the opposite side so it keeps travelling the same way, and can't re-enter until it has left the exit mouth. They don't pull or collide.
+
+Upside down only flips the vertical gravity component, so left/right tilt still behaves intuitively. In debug builds, swipe the chamber left/right during play to jump between levels (play-testing aid). In free play this keeps 10 rings; in challenge it uses the level's real rings/time and turns the run into an unsaved practice run.
 # rinkulat
