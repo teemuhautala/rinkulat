@@ -56,6 +56,10 @@ class ChamberWorld(
     /** A peg from [baseY] to [tipY]. [sink] is the direction (+1 down, -1 up) caught rings slide toward the base. */
     class Peg(val x: Float, val tipY: Float, val baseY: Float) {
         val sink = if (baseY > tipY) 1f else -1f
+
+        /** Vertical extent of the mount block beyond the base end, which free rings bounce off. */
+        val mountTop get() = if (sink > 0f) baseY else baseY - MOUNT_HEIGHT
+        val mountBottom get() = mountTop + MOUNT_HEIGHT
     }
 
     class Particle(var x: Float, var y: Float, val size: Float, val isBubble: Boolean)
@@ -283,6 +287,7 @@ class ChamberWorld(
             for (peg in pegs) {
                 val cy = ring.y.coerceIn(min(peg.tipY, peg.baseY), max(peg.tipY, peg.baseY))
                 pushOut(ring, peg.x, cy, PEG_RADIUS, onTip = cy == peg.tipY)
+                pushOutOfMount(ring, peg)
             }
             layout.obstacles.forEach { pushOut(ring, it.x, it.y, it.radius, onTip = true) }
         }
@@ -419,6 +424,19 @@ class ChamberWorld(
             ring.vy -= (1f + RESTITUTION) * vn * ny
         }
         if (onTip && abs(dx) < 0.004f) ring.vx += (if (random.nextBoolean()) 0.05f else -0.05f)
+    }
+
+    /**
+     * The mount is a rounded rectangle: the closest point on its inner (corner-radius-shrunk) rectangle
+     * plus a round contact of the corner radius gives the same outline.
+     */
+    private fun pushOutOfMount(ring: Ring, peg: Peg) {
+        val inset = MOUNT_HALF_WIDTH - MOUNT_CORNER
+        val cx = ring.x.coerceIn(peg.x - inset, peg.x + inset)
+        val cy = ring.y.coerceIn(peg.mountTop + MOUNT_CORNER, peg.mountBottom - MOUNT_CORNER)
+        // The end away from the peg is a ledge a ring could balance on.
+        val farEnd = if (peg.sink > 0f) peg.mountBottom - MOUNT_CORNER else peg.mountTop + MOUNT_CORNER
+        pushOut(ring, cx, cy, MOUNT_CORNER, onTip = cy == farEnd)
     }
 
     /** Projected ring half-extent along a direction, as a fraction of its radius. */
@@ -604,6 +622,11 @@ class ChamberWorld(
         /** Peg length fits 12 stacked rings per peg. */
         const val PEG_TIP_Y = PEG_BASE_Y - 0.245f
         const val PEG_COUNT = 2
+
+        /** Peg mount block beyond the base end (also used for drawing). */
+        const val MOUNT_HALF_WIDTH = PEG_RADIUS * 3f
+        const val MOUNT_HEIGHT = PEG_RADIUS * 9f
+        const val MOUNT_CORNER = PEG_RADIUS * 2f
         const val PARTICLE_COUNT = 60
 
         /** Pressed-jets mask with every jet held. */

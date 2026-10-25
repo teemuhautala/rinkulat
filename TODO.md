@@ -18,3 +18,4 @@
 - Tune shake feel on device: `SHAKE_RESPONSE`, chapter multiplier (2.5 for 11–15), dead zone/cap in `TiltSensor.kt`. Consider letting particles/liquid visibly slosh too, and whether shakes should knock caught rings off pegs.
 - Tune `ATTRACT_ACCEL`/`ATTRACT_REACH`: levels 12–15 are weightless (gravity ~0.13), so the planets' pull (~1.2 at contact) dominates and rings stay stuck to a planet until a jet or shake frees them; consider a weaker pull on weightless levels.
 - Play-test level 15 wormholes: mouth size (`WORMHOLE_RADIUS` 0.06), whether the mouth at (0.5, 0.5) sits too close to the hanging peg bases, and whether particles should also pass through.
+- Ads: replace the AdMob sample app ID (`AndroidManifest.xml`) and banner unit ID (`AdBanner.kt`) with real ones before release; add UMP consent (GDPR) handling before showing ads in the EU.

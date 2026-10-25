@@ -10,6 +10,7 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -119,78 +120,95 @@ fun RinkulatScreen(viewModel: GameViewModel = viewModel()) {
 private fun GameContent(viewModel: GameViewModel, pressedJets: Int, onJetPressChange: (jet: Int, down: Boolean) -> Unit) {
     val phase = viewModel.phase
     val atStart = phase == GamePhase.Menu || phase == GamePhase.LevelSelect
-    Box(
+    Column(
         Modifier
             .fillMaxSize()
             .background(Backdrop)
             .systemBarsPadding(),
     ) {
-        Column(
-            Modifier
-                .fillMaxSize()
-                .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Hud(
-                state = viewModel.hud,
-                atStart = atStart,
-                showRestart = viewModel.mode == GameMode.FreePlay && viewModel.phase == GamePhase.Playing,
-                onRestart = viewModel::startFreePlay,
-                onHome = viewModel::openMenu,
-                onScores = { viewModel.showScores() },
-            )
-            Spacer(Modifier.height(12.dp))
-            ToyCase(
-                world = viewModel.world,
-                layout = viewModel.layout,
-                frame = { viewModel.frame },
-                pressedJets = pressedJets,
-                onSwipe = if (viewModel.hud.canSwipeLevels) viewModel::changeLevel else null,
-                onJetPressChange = onJetPressChange,
-                modifier = Modifier.weight(1f),
-            )
+        // Overlays stay inside this box so they never cover the ad banner below it.
+        Box(Modifier.weight(1f)) {
+            GameLayers(viewModel, phase, atStart, pressedJets, onJetPressChange)
         }
-        if (phase == GamePhase.Menu && !viewModel.scoresVisible) {
-            StartButtons(
-                challengeStart = viewModel.challengeStart,
-                canChangeCheckpoint = viewModel.selectableCheckpoints.size > 1,
-                onChangeCheckpoint = viewModel::changeCheckpoint,
-                onChallenge = viewModel::startChallenge,
-                onFreePlay = viewModel::openLevelSelect,
-            )
+        if (atStart) {
+            AdBanner(Modifier.padding(bottom = 8.dp))
         }
-        if (phase == GamePhase.LevelSelect) {
-            LevelSelectOverlay(
-                tiles = viewModel.levelTiles,
-                allowLocked = viewModel.isDebug,
-                onPick = viewModel::pickFreePlayLevel,
-                onClose = viewModel::openMenu,
-            )
-        }
-        PhaseOverlay(
-            phase = phase,
-            onBeginLevel = viewModel::beginLevel,
-            onNextLevel = viewModel::nextLevel,
-            onPlayAgain = viewModel::playAgain,
-            onChooseLevel = viewModel::openLevelSelect,
-            namingEntry = viewModel.namingEntry,
-            playerName = viewModel.playerName,
-            onNameChange = viewModel::updatePlayerName,
+    }
+}
+
+@Composable
+private fun BoxScope.GameLayers(
+    viewModel: GameViewModel,
+    phase: GamePhase,
+    atStart: Boolean,
+    pressedJets: Int,
+    onJetPressChange: (jet: Int, down: Boolean) -> Unit,
+) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Hud(
+            state = viewModel.hud,
+            atStart = atStart,
+            showRestart = viewModel.mode == GameMode.FreePlay && viewModel.phase == GamePhase.Playing,
+            onRestart = viewModel::startFreePlay,
+            onHome = viewModel::openMenu,
             onScores = { viewModel.showScores() },
-            onQuit = viewModel::openMenu,
         )
-        if (viewModel.scoresVisible) {
-            ScoresOverlay(
-                tab = viewModel.scoresTab,
-                challengeScores = viewModel.challengeScores,
-                freePlayTimes = viewModel.freePlayTimes,
-                freePlayLevel = viewModel.scoresLevel,
-                latestEntry = viewModel.latestEntry,
-                onTabChange = viewModel::showScores,
-                onFreePlayLevelChange = viewModel::changeScoresLevel,
-                onClose = viewModel::hideScores,
-            )
-        }
+        Spacer(Modifier.height(12.dp))
+        ToyCase(
+            world = viewModel.world,
+            layout = viewModel.layout,
+            frame = { viewModel.frame },
+            pressedJets = pressedJets,
+            onSwipe = if (viewModel.hud.canSwipeLevels) viewModel::changeLevel else null,
+            onJetPressChange = onJetPressChange,
+            modifier = Modifier.weight(1f),
+        )
+    }
+    if (phase == GamePhase.Menu && !viewModel.scoresVisible) {
+        StartButtons(
+            challengeStart = viewModel.challengeStart,
+            canChangeCheckpoint = viewModel.selectableCheckpoints.size > 1,
+            onChangeCheckpoint = viewModel::changeCheckpoint,
+            onChallenge = viewModel::startChallenge,
+            onFreePlay = viewModel::openLevelSelect,
+        )
+    }
+    if (phase == GamePhase.LevelSelect) {
+        LevelSelectOverlay(
+            tiles = viewModel.levelTiles,
+            allowLocked = viewModel.isDebug,
+            onPick = viewModel::pickFreePlayLevel,
+            onClose = viewModel::openMenu,
+        )
+    }
+    PhaseOverlay(
+        phase = phase,
+        onBeginLevel = viewModel::beginLevel,
+        onNextLevel = viewModel::nextLevel,
+        onPlayAgain = viewModel::playAgain,
+        onChooseLevel = viewModel::openLevelSelect,
+        namingEntry = viewModel.namingEntry,
+        playerName = viewModel.playerName,
+        onNameChange = viewModel::updatePlayerName,
+        onScores = { viewModel.showScores() },
+        onQuit = viewModel::openMenu,
+    )
+    if (viewModel.scoresVisible) {
+        ScoresOverlay(
+            tab = viewModel.scoresTab,
+            challengeScores = viewModel.challengeScores,
+            freePlayTimes = viewModel.freePlayTimes,
+            freePlayLevel = viewModel.scoresLevel,
+            latestEntry = viewModel.latestEntry,
+            onTabChange = viewModel::showScores,
+            onFreePlayLevelChange = viewModel::changeScoresLevel,
+            onClose = viewModel::hideScores,
+        )
     }
 }
 
@@ -700,13 +718,12 @@ private fun DrawScope.drawPeg(peg: ChamberWorld.Peg, scale: Float) {
     val x = peg.x * scale
     val top = min(peg.tipY, peg.baseY) * scale
     val bottom = max(peg.tipY, peg.baseY) * scale
-    // Mount beyond the base end of the peg.
-    val mountHeight = r * 9f
+    // Mount beyond the base end of the peg; solid in the simulation too.
     drawRoundRect(
         Color.White.copy(alpha = 0.35f),
-        topLeft = Offset(x - r * 3f, if (peg.sink > 0f) bottom else top - mountHeight),
-        size = Size(r * 6f, mountHeight),
-        cornerRadius = CornerRadius(r * 2f),
+        topLeft = Offset(x - ChamberWorld.MOUNT_HALF_WIDTH * scale, peg.mountTop * scale),
+        size = Size(ChamberWorld.MOUNT_HALF_WIDTH * 2f * scale, ChamberWorld.MOUNT_HEIGHT * scale),
+        cornerRadius = CornerRadius(ChamberWorld.MOUNT_CORNER * scale),
     )
     drawRoundRect(
         Color.White.copy(alpha = 0.55f),

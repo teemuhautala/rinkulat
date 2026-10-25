@@ -1,8 +1,19 @@
 # Last session
 
-**Date:** 20.10.2026
+**Date:** 23.10.2026
 
 **What changed:**
+Added an AdMob banner (`play-services-ads` 25.4.0) at the bottom of the screen, below the game area, on the start screen and free-play level grid (`GamePhase.Menu`/`LevelSelect`); it disappears when a game starts. Overlays live in a box above it so they never cover it. `MobileAds.initialize` runs on a background thread in `MainActivity`. The manifest has the `APPLICATION_ID` meta-data. Both the app ID and the banner unit ID are Google's sample/test IDs.
+
+**Verification performed:**
+- `env -u ANDROID_SDK_ROOT ./gradlew test assembleDebug` — passes.
+- `~/bin/build_apk.sh` — `build_output/Rinkulat-debug.apk`.
+- Not checked on a device.
+
+**Known issues / follow-ups:**
+See `TODO.md` (real ad IDs, consent).
+
+Previous session (20.10.2026):
 Level 15 is now "Wormholes": the center planet became a wormhole mouth at (0.5, 1.0) with its twin mirrored to (0.5, 0.5), on the other side of the pegs. Rings entering one mouth exit the other with unchanged velocity (`ChamberWorld.travelThrough`, `Ring.wormholeExit` prevents bouncing back). The two side planets stay. Levels 12–15 were also made weightless like level 11 earlier in the day.
 
 Levels 12–15 no longer have currents; their obstacles now attract nearby free rings like small planets (`LevelLayout.attractingObstacles`, `ChamberWorld.obstaclePull`, `ATTRACT_ACCEL` 1.4 / `ATTRACT_REACH` 0.18), drawn with a faint halo. Follow-up: level 12 switched to normal gravity and level 14 got two attracting obstacles, so 12–15 are all distinct again (12 normal + 1, 13 upside down + 1, 14 upside down + 2, 15 upside down + 3). Then 12–15 were made weightless like 11 (same `WEIGHTLESS_GRAVITY`).

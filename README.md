@@ -14,6 +14,7 @@ Package: `fi.dreamr.rinkulat` · single-module Compose app (`:app`), portrait on
 - `game/ScoreRepository.kt` — SharedPreferences `rinkulat_scores`: top-10 lists with player names (challenge points; free-play times per level), last player name, highest level reached (unlocks) and best free-play time per level.
 - `ui/theme/Theme.kt` — `ToyTheme` per `ThemeId` (liquid, button, particle colors, scenery), provided through `LocalToyTheme`.
 - `ui/GameOverlays.kt` — start buttons with checkpoint selector, free-play level grid, toy-styled level/result cards, scores list.
+- `ui/AdBanner.kt` — AdMob banner shown at the bottom of the start screen and free-play level grid (sample IDs for now).
 - `ui/RinkulatScreen.kt` — frame loop (`withFrameNanos`), HUD, toy case, chamber Canvas rendering, push button, win overlay.
 
 ## Physics notes
