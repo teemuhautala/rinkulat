@@ -9,8 +9,8 @@ class TiersAndScoresTest {
     @Test
     fun ringsGrowToTenAndTimeToTwoThirty() {
         val levels = 1..Tiers.MAX_LEVEL
-        assertEquals(listOf(5, 6, 7, 8, 9) + List(10) { 10 }, levels.map { Tiers.ringsFor(it) })
-        assertEquals((0 until 10).map { 60 + it * 10 } + List(5) { 150 }, levels.map { Tiers.secondsFor(it) })
+        assertEquals(listOf(5, 6, 7, 8, 9) + List(15) { 10 }, levels.map { Tiers.ringsFor(it) })
+        assertEquals((0 until 10).map { 60 + it * 10 } + List(10) { 150 }, levels.map { Tiers.secondsFor(it) })
         // Past the defined chapters: defaults.
         assertEquals(10, Tiers.ringsFor(16))
         assertEquals(150, Tiers.secondsFor(23))
@@ -18,7 +18,7 @@ class TiersAndScoresTest {
 
     @Test
     fun levelNumbersAreContiguous() {
-        assertEquals(15, Tiers.MAX_LEVEL)
+        assertEquals(20, Tiers.MAX_LEVEL)
         assertEquals((1..Tiers.MAX_LEVEL).toList(), LevelLayout.LEVELS.map { it.number })
         assertEquals(1, LevelLayout.CLASSIC.number)
     }
@@ -36,14 +36,14 @@ class TiersAndScoresTest {
     @Test
     fun chaptersGiveThemesAndCheckpoints() {
         assertEquals(
-            List(5) { ThemeId.Orange } + List(5) { ThemeId.Sea } + List(5) { ThemeId.Space },
-            (1..15).map { Tiers.themeFor(it) },
+            List(5) { ThemeId.Orange } + List(5) { ThemeId.Sea } + List(5) { ThemeId.Space } + List(5) { ThemeId.Mechanicals },
+            (1..20).map { Tiers.themeFor(it) },
         )
-        assertEquals(ThemeId.Space, Tiers.themeFor(17))
+        assertEquals(ThemeId.Mechanicals, Tiers.themeFor(23))
         assertEquals(listOf(1, 6, 11, 16), (1..16).filter { Tiers.isCheckpoint(it) })
         assertEquals(listOf(1), Tiers.checkpoints(upTo = 5))
         assertEquals(listOf(1, 6), Tiers.checkpoints(upTo = 7))
-        assertEquals(listOf(1, 6, 11), Tiers.checkpoints(upTo = 99))
+        assertEquals(listOf(1, 6, 11, 16), Tiers.checkpoints(upTo = 99))
     }
 
     @Test
@@ -56,7 +56,7 @@ class TiersAndScoresTest {
 
     @Test
     fun levelTwistsFollowTheTable() {
-        val layouts = (1..Tiers.MAX_LEVEL).map { Tiers.layoutFor(it) }
+        val layouts = (1..15).map { Tiers.layoutFor(it) }
         assertEquals(listOf(1, 3, 4, 8, 10) + List(10) { 10 }, layouts.map { it.jets.size })
         // Jets accumulate and never change position or direction once they appear.
         for (i in 1 until layouts.size) {
@@ -69,15 +69,15 @@ class TiersAndScoresTest {
         assertEquals(listOf(false, false) + List(13) { true }, layouts.map { l -> l.jets.any { it.fromTop } })
         assertEquals(listOf(0, 0, 0, 0, 0, 1, 1, 3, 3, 3, 0, 1, 1, 2, 2), layouts.map { it.obstacles.size })
         // Chapter 3 is weightless; 12 keeps normal orientation, 13–15 are upside down.
-        assertEquals((11..15).toList(), (1..Tiers.MAX_LEVEL).filter { layouts[it - 1].weightless })
-        assertEquals((13..15).toList(), (1..Tiers.MAX_LEVEL).filter { layouts[it - 1].upsideDown })
+        assertEquals((11..15).toList(), (1..15).filter { layouts[it - 1].weightless })
+        assertEquals((13..15).toList(), (1..15).filter { layouts[it - 1].upsideDown })
         val n = Current.None
         assertEquals(
             listOf(n, n, n, n, n, n, Current.Right, n, Current.Right, Current.Shear, n, n, n, n, n),
             layouts.map { it.current },
         )
-        assertEquals((12..15).toList(), (1..Tiers.MAX_LEVEL).filter { layouts[it - 1].attractingObstacles })
-        assertEquals(listOf(15), (1..Tiers.MAX_LEVEL).filter { layouts[it - 1].wormholes != null })
+        assertEquals((12..15).toList(), (1..15).filter { layouts[it - 1].attractingObstacles })
+        assertEquals(listOf(15), (1..15).filter { layouts[it - 1].wormholes != null })
         // Upside-down obstacles are mirrored into the lower half.
         layouts.filter { it.upsideDown }.flatMap { it.obstacles }.forEach { assertTrue(it.y > ChamberWorld.HEIGHT / 2f) }
         // Corner jets (bottom from level 4, top from level 5) aim straight at the chamber center.
@@ -90,6 +90,19 @@ class TiersAndScoresTest {
             assertEquals(0f, toCenterX * jet.dirY - toCenterY * jet.dirX, 1e-4f) // parallel
             assertTrue(toCenterX * jet.dirX + toCenterY * jet.dirY > 0f) // same way
         }
+    }
+
+    @Test
+    fun mechanicalsHaveAllJetsAndReorderedMotion() {
+        assertEquals(
+            listOf(PegMotion.Slide, PegMotion.Rotate, PegMotion.Combined, PegMotion.Rotate, PegMotion.Spin),
+            (16..20).map { Tiers.layoutFor(it).pegMotion },
+        )
+        for (level in 16..20) {
+            assertEquals(Tiers.layoutFor(5).jets, Tiers.layoutFor(level).jets)
+            assertTrue(Tiers.layoutFor(level).obstacles.isEmpty())
+        }
+        assertTrue((1..15).all { Tiers.layoutFor(it).pegMotion == PegMotion.Still })
     }
 
     @Test

@@ -3,7 +3,7 @@ package fi.dreamr.rinkulat.game
 import kotlin.math.ceil
 
 /** Visual theme of a chapter; the colors and scenery live in the UI layer. */
-enum class ThemeId { Orange, Sea, Space }
+enum class ThemeId { Orange, Sea, Space, Mechanicals }
 
 /**
  * One block of [Tiers.CHAPTER_LENGTH] levels: its theme and the ring count and time of each level in it
@@ -33,6 +33,7 @@ object Tiers {
         Chapter(ThemeId.Orange, rings = listOf(5, 6, 7, 8, 9), seconds = listOf(60, 70, 80, 90, 100)),
         Chapter(ThemeId.Sea, rings = listOf(10, 10, 10, 10, 10), seconds = listOf(110, 120, 130, 140, 150)),
         Chapter(ThemeId.Space, rings = List(5) { 10 }, seconds = List(5) { 150 }, shake = 2.5f),
+        Chapter(ThemeId.Mechanicals, rings = List(5) { 10 }, seconds = List(5) { 150 }),
     )
 
     val MAX_LEVEL = LevelLayout.LEVELS.size

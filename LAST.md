@@ -1,5 +1,39 @@
 # Last session
 
+**Date:** 28.10.2026
+
+**What changed:**
+Attracting orbs in levels 12–15 now have dark violet shading, a subtle rim/highlight and a lavender attraction halo. Earlier obstacles retain their pale appearance. Verified with `assembleDebug` and regenerated the APK; visual appearance has not been checked on a device.
+
+Enabled the full set of ten push controls in every Mechanicals level (16–20). Swapped levels 16/17 and 18/19: sliding rails, rocking brass, clockwork, turning cogs, full revolution. Updated existing layout and motion tests and the README. Levels 19 and 20 now also rise/fall ±0.10 world units in opposite phases (about 8.4 seconds per cycle), preserving their swing/full rotation. Moving-frame physics includes vertical velocity for catches, collisions and attached rings.
+
+**Verification performed:**
+- `env -u ANDROID_SDK_ROOT ./gradlew test assembleDebug` — passes.
+- `~/bin/build_apk.sh` — generated `build_output/Rinkulat-debug.apk`.
+- Regression tests cover opposite vertical phases, travel bounds, preserved peg length, reset, moving-tip catches, attached stacks and full-rotation clearance.
+- Not play-tested on a device.
+
+**Known issues / follow-ups:**
+Saved best times remain tied to level numbers. Play-test the revised order and full controls; see `TODO.md`.
+
+Previous session (27.10.2026):
+
+**Date:** 27.10.2026
+
+**What changed:**
+Added chapter 4, Mechanicals (16–20), copying the jet layouts from 1–5 with 10 rings / 2:30 and checkpoint 16. Levels 16/18 rock pegs around their bases, 17 slides them sideways, 19 combines both. Level 20 now uses continuous 360° rotation with fixed bases, shorter 0.18-unit pegs, 0.4 rad/s speed and a 45° offset between pegs. Swept outlines stay clear of each other and the walls; each short peg holds 9 rings. Steampunk scenery uses brass gears, copper pipes, riveted panels and a pressure gauge. Peg-frame physics keeps catching, mount/shaft collisions, stacking, ring orientation and release aligned with the moving pegs. Restart resets movement phase. Earlier levels retain stationary pegs.
+
+**Verification performed:**
+- `env -u ANDROID_SDK_ROOT ./gradlew test assembleDebug` — passes; 40 tests in each debug/release suite.
+- `~/bin/build_apk.sh` — generated `build_output/Rinkulat-debug.apk`.
+- New regressions cover motion bounds/reset, moving-tip catches, solid rotated mounts, release and winning with moving stacks; level 20 also checks multiple full turns, constant phase, smooth angular velocity, full swept clearance and capacity.
+- Not play-tested on a device.
+
+**Known issues / follow-ups:**
+Play-test movement speeds, difficulty and scenery contrast; see `TODO.md`.
+
+Previous session (23.10.2026):
+
 **Date:** 23.10.2026
 
 **What changed:**

@@ -24,7 +24,7 @@ val RingColors = listOf(
     Color(0xFFB98CF5), // lilac
 )
 
-enum class Scenery { Garden, Sea, Space }
+enum class Scenery { Garden, Sea, Space, Mechanicals }
 
 /** Colors and decoration of the toy for one chapter of levels. */
 data class ToyTheme(
@@ -68,10 +68,21 @@ private val SpaceTheme = ToyTheme(
     scenery = Scenery.Space,
 )
 
+private val MechanicalTheme = ToyTheme(
+    liquidTop = Color(0xFF655044),
+    liquidBottom = Color(0xFF241F24),
+    button = Color(0xFFE5BE72),
+    buttonDark = Color(0xFF9D6337),
+    buttonText = Color(0xFF302218),
+    particle = Color(0xFFF7DFA0),
+    scenery = Scenery.Mechanicals,
+)
+
 fun toyThemeFor(id: ThemeId) = when (id) {
     ThemeId.Orange -> OrangeTheme
     ThemeId.Sea -> SeaTheme
     ThemeId.Space -> SpaceTheme
+    ThemeId.Mechanicals -> MechanicalTheme
 }
 
 /** Theme of the chapter currently shown. */

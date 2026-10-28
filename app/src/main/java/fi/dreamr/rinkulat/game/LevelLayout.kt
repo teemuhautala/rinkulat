@@ -25,6 +25,8 @@ data class Obstacle(val x: Float, val y: Float, val radius: Float)
 /** One mouth of a wormhole pair: a free ring whose center enters it comes out of the other mouth. */
 data class Wormhole(val x: Float, val y: Float, val radius: Float)
 
+enum class PegMotion { Still, Rotate, Slide, Combined, Spin }
+
 enum class Current { None, Right, Left, Shear }
 
 /**
@@ -45,6 +47,9 @@ data class LevelLayout(
     val attractingObstacles: Boolean = false,
     /** Connected wormhole mouths; a ring entering either one leaves through the other. */
     val wormholes: Pair<Wormhole, Wormhole>? = null,
+    val pegMotion: PegMotion = PegMotion.Still,
+    /** Pegs rise and fall in opposite phases while rotating. */
+    val verticalPegMotion: Boolean = false,
 ) {
     companion object {
         const val SLOTS_PER_STRIP = 5
@@ -183,6 +188,12 @@ data class LevelLayout(
                 attractingObstacles = true,
                 weightless = true,
             ),
+            // Chapter 4: all jets available with mechanical peg movement.
+            LevelLayout(number = 16, title = "Mechanicals: sliding rails", jets = allJets, pegMotion = PegMotion.Slide),
+            LevelLayout(number = 17, title = "Mechanicals: rocking brass", jets = allJets, pegMotion = PegMotion.Rotate),
+            LevelLayout(number = 18, title = "Mechanicals: clockwork", jets = allJets, pegMotion = PegMotion.Combined),
+            LevelLayout(number = 19, title = "Mechanicals: turning cogs", jets = allJets, pegMotion = PegMotion.Rotate, verticalPegMotion = true),
+            LevelLayout(number = 20, title = "Mechanicals: full revolution", jets = allJets, pegMotion = PegMotion.Spin, verticalPegMotion = true),
         ).sortedBy { it.number }
 
         /** The single-jet toy; the world's default layout. */

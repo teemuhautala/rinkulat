@@ -54,7 +54,14 @@ class ChamberWorld(
     }
 
     /** A peg from [baseY] to [tipY]. [sink] is the direction (+1 down, -1 up) caught rings slide toward the base. */
-    class Peg(val x: Float, val tipY: Float, val baseY: Float) {
+    class Peg(var x: Float, var tipY: Float, var baseY: Float) {
+        val homeX = x
+        val homeBaseY = baseY
+        val homeTipY = tipY
+        var angle = 0f
+        var velocityX = 0f
+        var velocityY = 0f
+        var angularVelocity = 0f
         val sink = if (baseY > tipY) 1f else -1f
 
         /** Vertical extent of the mount block beyond the base end, which free rings bounce off. */
@@ -130,6 +137,7 @@ class ChamberWorld(
     /** One fixed step. Bit i of [pressedJets] holds jet i of the layout. */
     fun step(dt: Float, gravityX: Float, gravityY: Float, pressedJets: Int) {
         time += dt
+        movePegs(dt)
         // The clock starts with the first caught ring, so shaking the phone before pumping gains nothing.
         if (!started && rings.any { it.isCaught }) started = true
         if (started && !won) elapsed += dt
@@ -154,7 +162,7 @@ class ChamberWorld(
         val gy = gravityY * g * (if (layout.upsideDown) -1f else 1f) - shakeY * shake
 
         for (ring in rings) {
-            if (ring.isCaught) stepCaught(ring, dt, gy) else stepFree(ring, dt, gx, gy)
+            if (ring.isCaught) stepCaught(ring, dt, gx, gy) else stepFree(ring, dt, gx, gy)
         }
         collideRings()
         stackCaughtRings()
@@ -229,6 +237,7 @@ class ChamberWorld(
         started = false
         won = false
         accumulator = 0f
+        time = 0f
     }
 
     private val flow = FloatArray(2)
@@ -285,9 +294,11 @@ class ChamberWorld(
         tryCatch(ring)
         if (!ring.isCaught) {
             for (peg in pegs) {
-                val cy = ring.y.coerceIn(min(peg.tipY, peg.baseY), max(peg.tipY, peg.baseY))
-                pushOut(ring, peg.x, cy, PEG_RADIUS, onTip = cy == peg.tipY)
-                pushOutOfMount(ring, peg)
+                inPegFrame(ring, peg) {
+                    val cy = ring.y.coerceIn(min(peg.tipY, peg.baseY), max(peg.tipY, peg.baseY))
+                    pushOut(ring, peg.x, cy, PEG_RADIUS, onTip = cy == peg.tipY)
+                    pushOutOfMount(ring, peg)
+                }
             }
             layout.obstacles.forEach { pushOut(ring, it.x, it.y, it.radius, onTip = true) }
         }
@@ -341,65 +352,133 @@ class ChamberWorld(
         out[1] = dy / dist * strength
     }
 
-    private fun tryCatch(ring: Ring) {
-        if (ring.flatness < CATCH_MIN_FLATNESS) return
+    /** Transform contacts into the peg's moving frame, including its surface velocity. */
+    private inline fun inPegFrame(ring: Ring, peg: Peg, action: () -> Unit) {
+        val c = cos(peg.angle)
+        val s = sin(peg.angle)
+        val dx = ring.x - peg.x
+        val dy = ring.y - peg.baseY
+        val vx = ring.vx - peg.velocityX + peg.angularVelocity * dy
+        val vy = ring.vy - peg.velocityY - peg.angularVelocity * dx
+        ring.x = peg.x + c * dx + s * dy
+        ring.y = peg.baseY - s * dx + c * dy
+        ring.vx = c * vx + s * vy
+        ring.vy = -s * vx + c * vy
+        ring.roll = wrapAngle(ring.roll - peg.angle)
+        action()
+        val localX = ring.x - peg.x
+        val localY = ring.y - peg.baseY
+        val worldX = c * localX - s * localY
+        val worldY = s * localX + c * localY
+        val localVx = ring.vx
+        ring.vx = c * localVx - s * ring.vy + peg.velocityX - peg.angularVelocity * worldY
+        ring.vy = s * localVx + c * ring.vy + peg.velocityY + peg.angularVelocity * worldX
+        ring.x = peg.x + worldX
+        ring.y = peg.baseY + worldY
+        ring.roll = wrapAngle(ring.roll + peg.angle)
+    }
+
+    private fun movePegs(dt: Float) {
+        if (layout.pegMotion == PegMotion.Still) return
         for ((index, peg) in pegs.withIndex()) {
-            // Must be moving toward the base, not being pushed away from it.
-            if (ring.vy * peg.sink <= -0.05f) continue
-            val dx = abs(ring.x - peg.x)
-            val beforeTip = (peg.tipY - ring.y) * peg.sink
-            if (dx < CATCH_TOLERANCE && beforeTip > -0.01f && beforeTip < RING_RADIUS + PEG_RADIUS) {
-                ring.peg = index
-                ring.x = peg.x
-                ring.vx = 0f
-                return
+            val direction = if (index == 0) 1f else -1f
+            val rotating = layout.pegMotion != PegMotion.Slide
+            val sliding = layout.pegMotion == PegMotion.Slide || layout.pegMotion == PegMotion.Combined
+            // Keep the angle unwrapped so crossing a full turn cannot spike angular velocity.
+            val angle = when {
+                layout.pegMotion == PegMotion.Spin -> time * SPIN_SPEED + index * SPIN_PHASE
+                rotating -> direction * 0.48f * sin(time * 0.65f)
+                else -> 0f
+            }
+            val x = peg.homeX + if (sliding) 0.10f * sin(time * 0.75f) else 0f
+            val verticalOffset = if (layout.verticalPegMotion) {
+                -direction * PEG_VERTICAL_TRAVEL * sin(time * PEG_VERTICAL_SPEED)
+            } else 0f
+            val baseY = peg.homeBaseY + verticalOffset
+            // Carry attached rings with the mechanism, preserving their axial slide speed.
+            val attached = rings.filter { it.peg == index }
+            val distances = attached.map { (it.x - peg.x) * -sin(peg.angle) + (it.y - peg.baseY) * cos(peg.angle) }
+            val speeds = attached.map {
+                (it.vx - peg.velocityX) * -sin(peg.angle) + (it.vy - peg.velocityY) * cos(peg.angle)
+            }
+            val deltaAngle = angle - peg.angle
+            peg.velocityX = (x - peg.x) / dt
+            peg.velocityY = (baseY - peg.baseY) / dt
+            peg.angularVelocity = deltaAngle / dt
+            peg.x = x
+            peg.baseY = baseY
+            peg.tipY = peg.homeTipY + verticalOffset
+            peg.angle = angle
+            attached.forEachIndexed { i, ring ->
+                val dx = -sin(angle) * distances[i]
+                val dy = cos(angle) * distances[i]
+                ring.x = x + dx
+                ring.y = peg.baseY + dy
+                ring.vx = -sin(angle) * speeds[i] + peg.velocityX - peg.angularVelocity * dy
+                ring.vy = cos(angle) * speeds[i] + peg.velocityY + peg.angularVelocity * dx
+                ring.roll = wrapAngle(ring.roll + deltaAngle)
             }
         }
     }
 
-    private fun stepCaught(ring: Ring, dt: Float, gy: Float) {
-        val peg = pegs[ring.peg]
-        flowAt(ring.x, ring.y, flow)
-        // Constrained to slide along the peg; the liquid grips it less than a free ring.
-        ring.vy += (DRAG * CAUGHT_FLOW_COUPLING * (flow[1] - ring.vy) + gy) * dt
-        // Friction resists only pushes away from the base, so rings still slide down freely but
-        // the jet has to overcome it before lifting them off.
-        val towardBase = ring.vy * peg.sink
-        if (towardBase < 0f) ring.vy = min(0f, towardBase + PEG_FRICTION * dt) * peg.sink
-        ring.y += ring.vy * dt
-        ring.x = peg.x
-        ring.vx = 0f
-        // Settle toward lying flat on the peg.
-        val target = if (ring.phi < PI.toFloat()) PI.toFloat() / 2f else PI.toFloat() * 1.5f
-        ring.phi += (target - ring.phi) * min(1f, 6f * dt)
-        ring.omega = 0f
-        val rollTarget = when {
-            ring.roll < PI.toFloat() / 2f -> 0f
-            ring.roll < PI.toFloat() * 1.5f -> PI.toFloat()
-            else -> 2f * PI.toFloat()
-        }
-        ring.roll = wrapAngle(ring.roll + (rollTarget - ring.roll) * min(1f, 6f * dt))
-        ring.rollOmega = 0f
-
-        if ((peg.tipY - ring.y) * peg.sink > RELEASE_MARGIN) {
-            // Pushed off the end of the peg.
-            ring.peg = -1
+    private fun tryCatch(ring: Ring) {
+        for ((index, peg) in pegs.withIndex()) {
+            inPegFrame(ring, peg) {
+                val beforeTip = (peg.tipY - ring.y) * peg.sink
+                if (ring.flatness >= CATCH_MIN_FLATNESS && ring.vy * peg.sink > -0.05f &&
+                    abs(ring.x - peg.x) < CATCH_TOLERANCE &&
+                    beforeTip > -0.01f && beforeTip < RING_RADIUS + PEG_RADIUS
+                ) {
+                    ring.peg = index
+                    ring.x = peg.x
+                    ring.vx = 0f
+                }
+            }
+            if (ring.isCaught) return
         }
     }
 
-    /** Caught rings rest on the peg base and on each other. */
+    private fun stepCaught(ring: Ring, dt: Float, gx: Float, gy: Float) {
+        val peg = pegs[ring.peg]
+        flowAt(ring.x, ring.y, flow)
+        val alongFlow = -sin(peg.angle) * (flow[0] - peg.velocityX) + cos(peg.angle) * flow[1]
+        val alongGravity = -sin(peg.angle) * gx + cos(peg.angle) * gy
+        inPegFrame(ring, peg) {
+            ring.vy += (DRAG * CAUGHT_FLOW_COUPLING * (alongFlow - ring.vy) + alongGravity) * dt
+            val towardBase = ring.vy * peg.sink
+            if (towardBase < 0f) ring.vy = min(0f, towardBase + PEG_FRICTION * dt) * peg.sink
+            ring.y += ring.vy * dt
+            ring.x = peg.x
+            ring.vx = 0f
+            val target = if (ring.phi < PI.toFloat()) PI.toFloat() / 2f else PI.toFloat() * 1.5f
+            ring.phi += (target - ring.phi) * min(1f, 6f * dt)
+            ring.omega = 0f
+            val rollTarget = when {
+                ring.roll < PI.toFloat() / 2f -> 0f
+                ring.roll < PI.toFloat() * 1.5f -> PI.toFloat()
+                else -> 2f * PI.toFloat()
+            }
+            ring.roll = wrapAngle(ring.roll + (rollTarget - ring.roll) * min(1f, 6f * dt))
+            ring.rollOmega = 0f
+            if ((peg.tipY - ring.y) * peg.sink > RELEASE_MARGIN) ring.peg = -1
+        }
+    }
+
+    /** Stack by distance along the peg, so tilted and moving stacks can still settle and win. */
     private fun stackCaughtRings() {
         for ((index, peg) in pegs.withIndex()) {
             var floor = peg.baseY
             rings.filter { it.peg == index }
-                .sortedByDescending { it.y * peg.sink }
+                .sortedByDescending { ((it.x - peg.x) * -sin(peg.angle) + (it.y - peg.baseY) * cos(peg.angle)) * peg.sink }
                 .forEach { ring ->
-                    if ((ring.y - floor) * peg.sink > 0f) {
-                        ring.y = floor
-                        if (ring.vy * peg.sink > 0f) ring.vy = 0f
+                    inPegFrame(ring, peg) {
+                        if ((ring.y - floor) * peg.sink > 0f) {
+                            ring.y = floor
+                            if (ring.vy * peg.sink > 0f) ring.vy = 0f
+                        }
+                        ring.settled = (ring.y - floor) * peg.sink >= -SETTLE_TOLERANCE && ring.vy * peg.sink >= -1e-5f
+                        floor = ring.y - RING_STACK_HEIGHT * peg.sink
                     }
-                    ring.settled = (ring.y - floor) * peg.sink >= -SETTLE_TOLERANCE && ring.vy * peg.sink >= 0f
-                    floor = ring.y - RING_STACK_HEIGHT * peg.sink
                 }
         }
     }
@@ -506,7 +585,13 @@ class ChamberWorld(
     private fun createPegs(): List<Peg> {
         // Upside down mirrors the pegs vertically: they hang from above, tips pointing down.
         fun mirror(y: Float) = if (layout.upsideDown) HEIGHT - y else y
-        return listOf(WIDTH * 0.3f, WIDTH * 0.7f).map { x -> Peg(x, mirror(PEG_TIP_Y), mirror(PEG_BASE_Y)) }
+        val spinning = layout.pegMotion == PegMotion.Spin
+        val tipY = if (spinning) PEG_BASE_Y - SPIN_PEG_LENGTH else PEG_TIP_Y
+        return listOf(WIDTH * 0.3f, WIDTH * 0.7f).mapIndexed { index, x ->
+            Peg(x, mirror(tipY), mirror(PEG_BASE_Y)).also {
+                if (spinning) it.angle = index * SPIN_PHASE
+            }
+        }
     }
 
     private fun createRings(count: Int): List<Ring> {
@@ -622,6 +707,13 @@ class ChamberWorld(
         /** Peg length fits 12 stacked rings per peg. */
         const val PEG_TIP_Y = PEG_BASE_Y - 0.245f
         const val PEG_COUNT = 2
+
+        // Swept peg envelopes (including tip radius) fit between bases 0.4 units apart.
+        const val PEG_VERTICAL_TRAVEL = 0.10f
+        const val PEG_VERTICAL_SPEED = 0.75f // radians/s: one rise/fall cycle in about 8.4 seconds
+        const val SPIN_PEG_LENGTH = 0.18f
+        const val SPIN_SPEED = 0.4f // radians/s: one revolution in about 15.7 seconds
+        const val SPIN_PHASE = PI.toFloat() / 4f // 45° apart, never horizontal together
 
         /** Peg mount block beyond the base end (also used for drawing). */
         const val MOUNT_HALF_WIDTH = PEG_RADIUS * 3f

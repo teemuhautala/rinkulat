@@ -438,6 +438,7 @@ private fun Chamber(world: ChamberWorld, theme: ToyTheme, frame: () -> Long, mod
                 Scenery.Garden -> drawGardenScenery(scale)
                 Scenery.Sea -> drawSeaScenery(scale)
                 Scenery.Space -> drawSpaceScenery(scale)
+                Scenery.Mechanicals -> drawMechanicalScenery(scale, world.clock)
             }
             drawParticles(world, theme.particle, scale)
             drawJets(world, scale)
@@ -464,6 +465,59 @@ private fun Chamber(world: ChamberWorld, theme: ToyTheme, frame: () -> Long, mod
 }
 
 private enum class Arc { Full, Back, Front }
+
+/** Muted brass machinery stays behind the bright rings and translucent pegs. */
+private fun DrawScope.drawMechanicalScenery(scale: Float, clock: Float) {
+    val brass = Color(0xFFB68D50).copy(alpha = 0.48f)
+    val shadow = Color(0xFF171B1D).copy(alpha = 0.65f)
+    val copper = Color(0xFFB57048).copy(alpha = 0.4f)
+    // Panel seams and rivets.
+    for (row in 0..4) {
+        val y = (0.08f + row * 0.34f) * scale
+        drawLine(shadow, Offset(0f, y), Offset(scale, y), 0.008f * scale)
+        for (x in listOf(0.035f, 0.965f)) {
+            drawCircle(brass, 0.008f * scale, Offset(x * scale, y + 0.025f * scale))
+        }
+    }
+    // Copper pipe runs and their collars along the chamber sides.
+    for (x in listOf(0.085f, 0.915f)) {
+        drawLine(shadow, Offset(x * scale, 0.12f * scale), Offset(x * scale, 1.4f * scale), 0.035f * scale)
+        drawLine(copper, Offset(x * scale, 0.12f * scale), Offset(x * scale, 1.4f * scale), 0.022f * scale)
+        for (y in listOf(0.25f, 0.65f, 1.15f)) {
+            drawLine(brass, Offset((x - 0.02f) * scale, y * scale), Offset((x + 0.02f) * scale, y * scale), 0.012f * scale)
+        }
+    }
+    fun gear(x: Float, y: Float, radius: Float, direction: Float) {
+        val center = Offset(x * scale, y * scale)
+        val r = radius * scale
+        rotate(clock * 10f * direction, center) {
+            repeat(12) { tooth ->
+                rotate(tooth * 30f, center) {
+                    drawRoundRect(brass, Offset(center.x - r * 0.14f, center.y - r * 1.12f),
+                        Size(r * 0.28f, r * 0.3f), CornerRadius(r * 0.035f))
+                }
+            }
+            drawCircle(brass, r * 0.84f, center, style = Stroke(r * 0.23f))
+            repeat(6) { spoke ->
+                val angle = spoke * PI.toFloat() / 3f
+                drawLine(brass, center, center + Offset(cos(angle) * r * 0.75f, sin(angle) * r * 0.75f), r * 0.1f)
+            }
+            drawCircle(shadow, r * 0.23f, center)
+            drawCircle(brass, r * 0.12f, center)
+        }
+    }
+    gear(0.22f, 0.23f, 0.13f, 1f)
+    gear(0.43f, 0.29f, 0.075f, -1.7f)
+    gear(0.80f, 1.24f, 0.14f, -1f)
+    gear(0.58f, 1.30f, 0.075f, 1.8f)
+    // A small pressure gauge.
+    val gauge = Offset(0.77f * scale, 0.28f * scale)
+    drawCircle(brass, 0.075f * scale, gauge)
+    drawCircle(Color(0xFFDDCE9E).copy(alpha = 0.5f), 0.061f * scale, gauge)
+    drawArc(shadow, 150f, 240f, false, gauge - Offset(0.045f * scale, 0.045f * scale),
+        Size(0.09f * scale, 0.09f * scale), style = Stroke(0.004f * scale))
+    drawLine(shadow, gauge, gauge + Offset(0.025f * scale, -0.028f * scale), 0.005f * scale)
+}
 
 private fun DrawScope.drawGardenScenery(scale: Float) {
     val w = ChamberWorld.WIDTH * scale
@@ -698,8 +752,8 @@ private fun DrawScope.drawObstacle(obstacle: Obstacle, scale: Float, attracting:
         val reach = r + ChamberWorld.ATTRACT_REACH * scale
         drawCircle(
             Brush.radialGradient(
-                0f to Color.White.copy(alpha = 0.18f),
-                r / reach to Color.White.copy(alpha = 0.12f),
+                0f to Color(0xFFB7A4E0).copy(alpha = 0.18f),
+                r / reach to Color(0xFFB7A4E0).copy(alpha = 0.12f),
                 1f to Color.Transparent,
                 center = center,
                 radius = reach,
@@ -707,6 +761,21 @@ private fun DrawScope.drawObstacle(obstacle: Obstacle, scale: Float, attracting:
             reach,
             center,
         )
+        // Shaded violet spheres distinguish the attracting planets from the pale bumpers.
+        drawCircle(
+            Brush.radialGradient(
+                0f to Color(0xFF817295),
+                0.5f to Color(0xFF554363),
+                1f to Color(0xFF30243F),
+                center = center + Offset(-r * 0.3f, -r * 0.3f),
+                radius = r * 1.4f,
+            ),
+            r,
+            center,
+        )
+        drawCircle(Color(0xFFC0ABD9).copy(alpha = 0.55f), r, center, style = Stroke(r * 0.07f))
+        drawCircle(Color(0xFFE0D2EE).copy(alpha = 0.35f), r * 0.18f, center + Offset(-r * 0.35f, -r * 0.35f))
+        return
     }
     drawCircle(Color.White.copy(alpha = 0.4f), r, center)
     drawCircle(Color.White.copy(alpha = 0.85f), r, center, style = Stroke(r * 0.12f))
@@ -718,20 +787,22 @@ private fun DrawScope.drawPeg(peg: ChamberWorld.Peg, scale: Float) {
     val x = peg.x * scale
     val top = min(peg.tipY, peg.baseY) * scale
     val bottom = max(peg.tipY, peg.baseY) * scale
-    // Mount beyond the base end of the peg; solid in the simulation too.
-    drawRoundRect(
-        Color.White.copy(alpha = 0.35f),
-        topLeft = Offset(x - ChamberWorld.MOUNT_HALF_WIDTH * scale, peg.mountTop * scale),
-        size = Size(ChamberWorld.MOUNT_HALF_WIDTH * 2f * scale, ChamberWorld.MOUNT_HEIGHT * scale),
-        cornerRadius = CornerRadius(ChamberWorld.MOUNT_CORNER * scale),
-    )
-    drawRoundRect(
-        Color.White.copy(alpha = 0.55f),
-        topLeft = Offset(x - r, if (peg.sink > 0f) top - r else top),
-        size = Size(r * 2f, bottom - top + r),
-        cornerRadius = CornerRadius(r),
-    )
-    drawLine(Color.White.copy(alpha = 0.9f), Offset(x - r * 0.4f, top), Offset(x - r * 0.4f, bottom), strokeWidth = r * 0.4f)
+    rotate(peg.angle * 180f / PI.toFloat(), pivot = Offset(x, peg.baseY * scale)) {
+        // Mount beyond the base end of the peg; solid in the simulation too.
+        drawRoundRect(
+            Color.White.copy(alpha = 0.35f),
+            topLeft = Offset(x - ChamberWorld.MOUNT_HALF_WIDTH * scale, peg.mountTop * scale),
+            size = Size(ChamberWorld.MOUNT_HALF_WIDTH * 2f * scale, ChamberWorld.MOUNT_HEIGHT * scale),
+            cornerRadius = CornerRadius(ChamberWorld.MOUNT_CORNER * scale),
+        )
+        drawRoundRect(
+            Color.White.copy(alpha = 0.55f),
+            topLeft = Offset(x - r, if (peg.sink > 0f) top - r else top),
+            size = Size(r * 2f, bottom - top + r),
+            cornerRadius = CornerRadius(r),
+        )
+        drawLine(Color.White.copy(alpha = 0.9f), Offset(x - r * 0.4f, top), Offset(x - r * 0.4f, bottom), strokeWidth = r * 0.4f)
+    }
 }
 
 private fun DrawScope.drawCaughtRings(world: ChamberWorld, scale: Float, frontHalf: Boolean) {

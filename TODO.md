@@ -9,7 +9,7 @@
 - Tune per-level twists on device: small jet strength/width, CURRENT_SPEED, obstacle position/size, how hard upside-down levels feel.
 - Currents are only visible through drifting particles; consider an on-screen hint (arrows) for them.
 - Level swiping is debug-only now; remove it entirely before release if not wanted.
-- Plan chapter 3+ (levels 11+): new mechanics in `LevelLayout.LEVELS`, new `ThemeId` + `ToyTheme`, and a `Tiers.CHAPTERS` entry (rings/time currently default to 10 / 2:30).
+- Play-test Mechanicals (16–20): tune peg rocking (±0.48 rad), sideways travel (±0.10), levels 19–20 opposite vertical travel (±0.10, 8.4-second cycle), level 20 full rotation (0.4 rad/s, 45° offset, 0.18-unit pegs), ring count/time (10 / 2:30), and scenery contrast on a device.
 - Per-level best times are keyed by level number; after renumbering levels the old bests stay with the number. Consider clearing or migrating them once the map is final.
 - Free-play times saved before per-level lists have level 0 and are no longer shown.
 - Tune the three-obstacle positions (`SIDE_OBSTACLE_Y`, x 0.22/0.78) and level 15 (proposal) on a device.

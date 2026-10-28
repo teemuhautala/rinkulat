@@ -19,6 +19,168 @@ class ChamberWorldTest {
     }
 
     @Test
+    fun mechanicalMotionStaysInsideChamberAndResets() {
+        for (level in 16..20) {
+            val world = ChamberWorld(0, Random(1))
+            world.reset(0, Tiers.layoutFor(level))
+            var rotated = false
+            var slid = false
+            repeat(2400) {
+                world.step(step, 0f, 1f, false)
+                world.pegs.forEach { peg ->
+                    rotated = rotated || kotlin.math.abs(peg.angle) > 0.1f
+                    slid = slid || kotlin.math.abs(peg.x - peg.homeX) > 0.02f
+                    val tipX = peg.x - kotlin.math.sin(peg.angle) * (peg.tipY - peg.baseY)
+                    assertTrue(tipX > 0.05f && tipX < 0.95f)
+                }
+            }
+            assertEquals(level != 16, rotated)
+            assertEquals(level == 16 || level == 18, slid)
+            world.reset()
+            assertEquals(0f, world.clock, 0f)
+            world.pegs.forEachIndexed { index, peg ->
+                assertEquals(peg.homeX, peg.x, 0f)
+                assertEquals(peg.homeBaseY, peg.baseY, 0f)
+                assertEquals(peg.homeTipY, peg.tipY, 0f)
+                assertEquals(0f, peg.velocityY, 0f)
+                assertEquals(if (level == 20) index * ChamberWorld.SPIN_PHASE else 0f, peg.angle, 0f)
+            }
+        }
+    }
+
+    @Test
+    fun verticalPegMotionHasOppositePhasesAndKeepsItsLength() {
+        for (level in 19..20) {
+            val world = ChamberWorld(0, Random(1))
+            world.reset(0, Tiers.layoutFor(level))
+            var rose = false
+            var fell = false
+            repeat(2400) {
+                world.step(step, 0f, 1f, false)
+                val left = world.pegs[0]
+                val right = world.pegs[1]
+                val offset = left.baseY - left.homeBaseY
+                rose = rose || offset < -0.09f
+                fell = fell || offset > 0.09f
+                assertEquals(-offset, right.baseY - right.homeBaseY, 1e-6f)
+                assertEquals(-left.velocityY, right.velocityY, 0.0001f)
+                for (peg in world.pegs) {
+                    assertEquals(peg.homeBaseY - peg.homeTipY, peg.baseY - peg.tipY, 1e-6f)
+                    assertTrue(kotlin.math.abs(peg.baseY - peg.homeBaseY) <= ChamberWorld.PEG_VERTICAL_TRAVEL + 1e-6f)
+                }
+            }
+            assertTrue(rose && fell)
+        }
+    }
+
+    @Test
+    fun fullRotationHasStaggeredPhasesAndClearanceThroughoutSeveralTurns() {
+        val world = ChamberWorld(0, Random(1))
+        world.reset(0, Tiers.layoutFor(20))
+        val initialAngles = world.pegs.map { it.angle }
+        repeat(6000) {
+            val previousAngles = world.pegs.map { it.angle }
+            world.step(step, 0f, 1f, false)
+            val radii = world.pegs.mapIndexed { index, peg ->
+                assertTrue(peg.angle > previousAngles[index])
+                assertEquals(ChamberWorld.SPIN_SPEED, peg.angularVelocity, 0.001f)
+                assertEquals(peg.homeX, peg.x, 0f)
+                assertEquals(ChamberWorld.SPIN_PEG_LENGTH, peg.baseY - peg.tipY, 1e-6f)
+                // A bounding circle covers both the shaft/tip and every corner of the mount.
+                val mountRadius = kotlin.math.sqrt(
+                    ChamberWorld.MOUNT_HEIGHT * ChamberWorld.MOUNT_HEIGHT +
+                        ChamberWorld.MOUNT_HALF_WIDTH * ChamberWorld.MOUNT_HALF_WIDTH,
+                )
+                val radius = maxOf(peg.baseY - peg.tipY + ChamberWorld.PEG_RADIUS, mountRadius)
+                assertTrue(peg.x - radius > 0f && peg.x + radius < ChamberWorld.WIDTH)
+                assertTrue(peg.baseY - radius > 0f && peg.baseY + radius < ChamberWorld.HEIGHT)
+                radius
+            }
+            assertTrue(radii.sum() < world.pegs[1].x - world.pegs[0].x)
+            assertEquals(ChamberWorld.SPIN_PHASE, world.pegs[1].angle - world.pegs[0].angle, 1e-5f)
+            // Horizontal is cos(angle) == 0; the two cannot approach it simultaneously.
+            assertTrue(world.pegs.any { kotlin.math.abs(kotlin.math.cos(it.angle)) > 0.3f })
+        }
+        world.pegs.forEachIndexed { index, peg ->
+            assertTrue(peg.angle - initialAngles[index] > 6f * PI.toFloat())
+        }
+        val capacity = world.pegs.sumOf { ((it.baseY - it.tipY) / ChamberWorld.RING_STACK_HEIGHT + 1e-3f).toInt() }
+        assertTrue(capacity >= Tiers.ringsFor(20))
+        assertTrue(capacity >= ChamberWorld.DEFAULT_RING_COUNT)
+    }
+
+    @Test
+    fun ringsCatchOnTiltedMovingTips() {
+        for (level in 16..20) {
+            val world = ChamberWorld(1, Random(12))
+            world.reset(1, Tiers.layoutFor(level))
+            world.run(1.5f)
+            val peg = world.pegs.first()
+            val ring = world.rings.single()
+            val distance = peg.tipY - peg.baseY - 0.025f
+            ring.x = peg.x - kotlin.math.sin(peg.angle) * distance
+            ring.y = peg.baseY + kotlin.math.cos(peg.angle) * distance
+            ring.phi = PI.toFloat() / 2f
+            ring.roll = peg.angle
+            ring.vx = peg.velocityX - peg.angularVelocity * (ring.y - peg.baseY)
+            ring.vy = peg.velocityY + peg.angularVelocity * (ring.x - peg.x)
+            world.step(step, 0f, 1f, false)
+            assertTrue("level $level catches at its moving tip", ring.isCaught)
+        }
+    }
+
+    @Test
+    fun rotatingMountsAreSolidAndRingsCanLeaveMovingTips() {
+        val world = ChamberWorld(1, Random(7))
+        world.reset(1, Tiers.layoutFor(18))
+        world.run(1.5f)
+        val peg = world.pegs.first()
+        val ring = world.rings.single()
+        val distance = ChamberWorld.MOUNT_HEIGHT / 2f
+        ring.x = peg.x - kotlin.math.sin(peg.angle) * distance
+        ring.y = peg.baseY + kotlin.math.cos(peg.angle) * distance
+        ring.phi = PI.toFloat() / 2f
+        ring.roll = peg.angle
+        ring.vx = 0f
+        ring.vy = 0f
+        world.step(step, 0f, 1f, false)
+        val across = (ring.x - peg.x) * kotlin.math.cos(peg.angle) +
+            (ring.y - peg.baseY) * kotlin.math.sin(peg.angle)
+        assertTrue(kotlin.math.abs(across) >= ChamberWorld.MOUNT_HALF_WIDTH)
+        assertFalse(ring.isCaught)
+
+        ring.peg = 0
+        val offTip = peg.tipY - peg.baseY - ChamberWorld.RELEASE_MARGIN - 0.01f
+        ring.x = peg.x - kotlin.math.sin(peg.angle) * offTip
+        ring.y = peg.baseY + kotlin.math.cos(peg.angle) * offTip
+        world.step(step, 0f, 1f, false)
+        assertFalse("rings can be pushed off a moving peg", ring.isCaught)
+    }
+
+    @Test
+    fun movingStacksTravelWithPegsAndCanWin() {
+        for (level in 16..20) {
+            val world = ChamberWorld(3, Random(17))
+            world.reset(3, Tiers.layoutFor(level))
+            world.rings.forEachIndexed { i, ring ->
+                ring.peg = 0
+                ring.x = world.pegs.first().x
+                ring.y = ChamberWorld.PEG_BASE_Y - 0.04f - i * ChamberWorld.RING_STACK_HEIGHT
+                ring.phi = PI.toFloat() / 2f
+            }
+            world.run(8f)
+            assertTrue("level $level can settle and win", world.won)
+            val peg = world.pegs.first()
+            world.rings.forEach { ring ->
+                assertTrue(ring.isCaught)
+                val across = (ring.x - peg.x) * kotlin.math.cos(peg.angle) +
+                    (ring.y - peg.baseY) * kotlin.math.sin(peg.angle)
+                assertEquals(0f, across, 1e-5f)
+            }
+        }
+    }
+
+    @Test
     fun onlyThePressedJetLiftsItsRing() {
         val world = ChamberWorld(ringCount = 2, random = Random(20))
         world.reset(2, Tiers.layoutFor(2))

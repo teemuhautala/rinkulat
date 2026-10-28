@@ -41,7 +41,8 @@ Package: `fi.dreamr.rinkulat` · single-module Compose app (`:app`), portrait on
 | 1–5 | Orange (garden) | 5, 6, 7, 8, 9 | 1:00 … 1:40 (+10 s/level) |
 | 6–10 | Sea (blue water, seaweed) | 10 | 1:50 … 2:30 |
 | 11–15 | Space (stars, planet) | 10 | 2:30 |
-| 16+ | last chapter's theme | 10 (default) | 2:30 (default) |
+| 16–20 | Mechanicals (brass gears and copper pipes) | 10 | 2:30 |
+| 21+ | last chapter's theme | 10 (default) | 2:30 (default) |
 
 Shakes and nudges push the rings opposite to the phone's motion; chapter 3 (11–15) reacts 2.5× stronger. Edit `Tiers.CHAPTERS` to change a chapter's theme, rings, times or shake strength.
 
@@ -49,7 +50,7 @@ Shakes and nudges push the rings opposite to the phone's motion; chapter 3 (11�
 
 ## Challenge levels
 
-Buttons accumulate: each level keeps the previous jets unchanged (position and direction) and may add more. Both button strips (above and below the chamber) are always shown at the same size with 5 slots: corner, ¼, center, ¾, corner.
+Buttons accumulate through levels 1–15. Mechanicals (16–20) has the full set of push controls in every level. Existing jets keep their position and direction. Both button strips (above and below the chamber) are always shown at the same size with 5 slots: corner, ¼, center, ¾, corner.
 
 | Lv | Jets | Twist |
 |---|---|---|
@@ -68,6 +69,13 @@ Buttons accumulate: each level keeps the previous jets unchanged (position and d
 | 13 | full set | weightless + upside down (pegs hang from above) + attracting obstacle |
 | 14 | full set | weightless + upside down + two attracting obstacles (high on the sides) |
 | 15 | full set | weightless + upside down + two attracting side obstacles + wormhole pair (center, mirrored across the pegs) |
+| 16 | full set | Mechanicals: pegs slide sideways |
+| 17 | full set | Mechanicals: pegs rotate back and forth |
+| 18 | full set | Mechanicals: rotation + sideways movement |
+| 19 | full set | Mechanicals: pegs swing while rising/falling in opposite phases |
+| 20 | full set | Mechanicals: shorter pegs, continuous 360° rotation, 45° phase offset, opposite vertical movement |
+
+Mechanicals uses a brass/copper theme with animated decorative gears, pipework, panel rivets and a pressure gauge. Levels 16–19 rock pegs ±0.48 radians around their bases and/or slide them ±0.10 world units horizontally. Levels 19 and 20 also move their pegs vertically ±0.10 world units in opposite phases, with an approximately 8.4-second cycle. Level 20 uses horizontally fixed bases and shorter 0.18-unit pegs (normally 0.245), rotating continuously in the same direction at 0.4 radians/s (about 15.7 seconds per revolution), 45° apart. Their full swept outlines, including mounts, stay clear of each other and the chamber walls; the shorter pegs still hold 9 rings each. Catches, shaft/mount collisions, ring orientation and stacking use the moving peg frame; caught rings travel with the pegs and can still be pumped off. Restart resets the mechanism phase. Level 16 is the new chapter checkpoint.
 
 Attracting obstacles (12–15) pull free rings within `ATTRACT_REACH` of their surface, up to `ATTRACT_ACCEL` at contact; a faint halo shows the range. The pull bends passing rings but jets free a ring resting against one.
 
