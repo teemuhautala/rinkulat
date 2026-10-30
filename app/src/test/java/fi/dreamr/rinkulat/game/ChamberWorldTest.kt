@@ -10,6 +10,65 @@ import kotlin.random.Random
 class ChamberWorldTest {
     private val step = ChamberWorld.STEP_DT
 
+    @Test
+    fun bubbleBuoyancyOpposesDeviceGravityIncludingUpsideDownLevels() {
+        for (level in listOf(1, 11, 13)) {
+            for ((gx, gy) in listOf(0f to 1f, 0f to -1f, 1f to 0f, -1f to 0f, 0.6f to 0.8f, 0f to 0f)) {
+                val tilted = ChamberWorld(0, Random(1)).apply { reset(0, Tiers.layoutFor(level)) }
+                val flat = ChamberWorld(0, Random(1)).apply { reset(0, Tiers.layoutFor(level)) }
+                for (world in listOf(tilted, flat)) world.particles.forEach { it.x = 0.5f; it.y = 0.75f }
+                tilted.step(0.05f, gx, gy, false)
+                flat.step(0.05f, 0f, 0f, false)
+                val bubble = tilted.particles.first { it.isBubble }
+                val reference = flat.particles.first { it.isBubble }
+                val scale = if (tilted.layout.weightless) ChamberWorld.WEIGHTLESS_GRAVITY else 1f
+                val verticalSign = if (tilted.layout.upsideDown) -1f else 1f
+                assertEquals(-gx * ChamberWorld.BUBBLE_RISE_SPEED * scale * 0.05f, bubble.x - reference.x, 0.000001f)
+                assertEquals(-gy * verticalSign * ChamberWorld.BUBBLE_RISE_SPEED * scale * 0.05f, bubble.y - reference.y, 0.000001f)
+                // Decorative non-bubble particles retain their existing flow behavior.
+                assertEquals(flat.particles[1].x, tilted.particles[1].x, 0f)
+                assertEquals(flat.particles[1].y, tilted.particles[1].y, 0f)
+            }
+        }
+    }
+
+    @Test
+    fun spaceBubblesMoveSlowlyIncludingInStreams() {
+        for (level in 11..15) {
+            for (pumping in listOf(false, true)) {
+                val layout = Tiers.layoutFor(level)
+                val space = ChamberWorld(0, Random(1)).apply { reset(0, layout) }
+                val normal = ChamberWorld(0, Random(1)).apply { reset(0, layout.copy(weightless = false)) }
+                for (world in listOf(space, normal)) world.particles.forEach { it.x = 0.5f; it.y = 0.75f }
+                space.step(0.05f, 0.6f, 0.8f, pumping)
+                normal.step(0.05f, 0.6f, 0.8f, pumping)
+                val bubble = space.particles.first { it.isBubble }
+                val reference = normal.particles.first { it.isBubble }
+                assertEquals((reference.x - 0.5f) * ChamberWorld.WEIGHTLESS_GRAVITY, bubble.x - 0.5f, 0.000001f)
+                assertEquals((reference.y - 0.75f) * ChamberWorld.WEIGHTLESS_GRAVITY, bubble.y - 0.75f, 0.000001f)
+                assertEquals(normal.particles[1].x, space.particles[1].x, 0f)
+                assertEquals(normal.particles[1].y, space.particles[1].y, 0f)
+            }
+        }
+    }
+
+    @Test
+    fun tiltedBubblesRecycleAcrossEveryChamberEdge() {
+        for ((gx, gy) in listOf(0f to 1f, 0f to -1f, 1f to 0f, -1f to 0f)) {
+            val world = ChamberWorld(0, Random(1))
+            val bubble = world.particles.first { it.isBubble }
+            bubble.x = when { gx > 0f -> 0f; gx < 0f -> ChamberWorld.WIDTH; else -> 0.5f }
+            bubble.y = when { gy > 0f -> 0f; gy < 0f -> ChamberWorld.HEIGHT; else -> 0.75f }
+            world.step(0.05f, gx, gy, false)
+            assertTrue(bubble.x in 0f..ChamberWorld.WIDTH)
+            assertTrue(bubble.y in 0f..ChamberWorld.HEIGHT)
+            if (gx > 0f) assertTrue(bubble.x > 0.9f)
+            if (gx < 0f) assertTrue(bubble.x < 0.1f)
+            if (gy > 0f) assertTrue(bubble.y > 1.4f)
+            if (gy < 0f) assertTrue(bubble.y < 0.1f)
+        }
+    }
+
     private fun ChamberWorld.run(seconds: Float, gx: Float = 0f, gy: Float = 1f, pumping: Boolean = false) {
         repeat((seconds / step).toInt()) { step(step, gx, gy, pumping) }
     }

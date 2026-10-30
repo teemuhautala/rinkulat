@@ -19,3 +19,7 @@
 - Tune `ATTRACT_ACCEL`/`ATTRACT_REACH`: levels 12–15 are weightless (gravity ~0.13), so the planets' pull (~1.2 at contact) dominates and rings stay stuck to a planet until a jet or shake frees them; consider a weaker pull on weightless levels.
 - Play-test level 15 wormholes: mouth size (`WORMHOLE_RADIUS` 0.06), whether the mouth at (0.5, 0.5) sits too close to the hanging peg bases, and whether particles should also pass through.
 - Ads: replace the AdMob sample app ID (`AndroidManifest.xml`) and banner unit ID (`AdBanner.kt`) with real ones before release; add UMP consent (GDPR) handling before showing ads in the EU.
+
+- Play-test the level 6+ fish in Challenge and Free play: nearest-stack/nearer-side approach and stream coverage from center/quarter buttons throughout the lift, the 30-second wait after a successful three-hit scare, sinking rings during approach and loss of contact, first-two-hit feedback versus third-hit retreat, focused-burst difficulty, the stronger 0.65-second escape reaction, the 70%-height range cutoff, visibility, swimming speed, ring drops and moving-peg targeting.
+
+- Play-test bubble buoyancy while tilting/rotating the device and the slow 12% bubble motion in space levels.

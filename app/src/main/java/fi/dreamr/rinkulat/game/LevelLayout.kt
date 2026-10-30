@@ -9,6 +9,18 @@ data class Jet(val x: Float, val y: Float, val dirX: Float, val dirY: Float, val
     /** Nozzles in the upper half get their button above the chamber. */
     val fromTop get() = y < HEIGHT / 2f
 
+    /** Visible cone geometry, also used for focused fish hits. */
+    val coneLength get() = if (fromTop || dirX != 0f) 1.0f else 1.25f
+    val coneNearWidth get() = if (big) 0.03f else 0.02f
+    val coneFarWidth get() = when {
+        slot == 2 -> if (big) 0.40f else 0.32f
+        big -> 0.25f
+        else -> 0.18f
+    }
+
+    fun coneHalfWidthAt(along: Float) =
+        coneNearWidth + (coneFarWidth - coneNearWidth) * (along / coneLength).coerceIn(0f, 1f)
+
     /** Button position in its strip: 0 = left corner, 1 = quarter, 2 = center, 3 = three quarters, 4 = right corner. */
     val slot get() = when {
         x < WIDTH * 0.18f -> 0

@@ -146,6 +146,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     /** Bit i of [pressedJets] is the button for jet i of [layout]. */
     fun advance(frameDt: Float, gravityX: Float, gravityY: Float, pressedJets: Int, shakeX: Float = 0f, shakeY: Float = 0f) {
         val playing = phase == GamePhase.Playing
+        world.fishActive = playing && world.layout.number >= ChamberWorld.FISH_FIRST_LEVEL
+        if (world.fishActive && (mode == GameMode.FreePlay || timeLeft <= Tiers.secondsFor(level) / 2f)) {
+            world.summonFish()
+        }
         world.shakeX = shakeX
         world.shakeY = shakeY
         world.advance(frameDt, gravityX, gravityY, if (playing) pressedJets else 0)
@@ -190,6 +194,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         layout = world.layout
         phase = GamePhase.Playing
         scoresVisible = false
+        world.fishActive = freePlayLevel >= ChamberWorld.FISH_FIRST_LEVEL
+        if (world.fishActive) world.summonFish()
     }
 
     /**

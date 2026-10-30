@@ -448,6 +448,7 @@ private fun Chamber(world: ChamberWorld, theme: ToyTheme, frame: () -> Long, mod
                 drawWormhole(a, scale, world.clock)
                 drawWormhole(b, scale, -world.clock)
             }
+            world.fish?.let { fish -> drawFish(fish, scale) }
             drawCaughtRings(world, scale, frontHalf = false)
             world.pegs.forEach { drawPeg(it, scale) }
             drawCaughtRings(world, scale, frontHalf = true)
@@ -690,10 +691,10 @@ private fun DrawScope.drawJets(world: ChamberWorld, scale: Float) {
         val nozzle = Offset(jet.x * scale, jet.y * scale)
         val dir = Offset(jet.dirX, jet.dirY)
         val perp = Offset(-jet.dirY, jet.dirX)
-        val length = (if (jet.fromTop || jet.dirX != 0f) 1.0f else 1.25f) * scale
+        val length = jet.coneLength * scale
         val far = nozzle + dir * length
-        val nearWidth = (if (jet.big) 0.03f else 0.02f) * scale
-        val farWidth = (if (jet.big) 0.25f else 0.18f) * scale
+        val nearWidth = jet.coneNearWidth * scale
+        val farWidth = jet.coneFarWidth * scale
         val path = Path().apply {
             moveTo(nozzle.x - perp.x * nearWidth, nozzle.y - perp.y * nearWidth)
             lineTo(far.x - perp.x * farWidth, far.y - perp.y * farWidth)
@@ -830,3 +831,26 @@ private fun DrawScope.drawRing(ring: ChamberWorld.Ring, scale: Float, arc: Arc) 
     }
 }
 
+
+private fun DrawScope.drawFish(fish: ChamberWorld.Fish, scale: Float) {
+    val center = Offset(fish.x * scale, fish.y * scale)
+    rotate(fish.heading * 180f / PI.toFloat(), center) {
+        val tail = Path().apply {
+            moveTo(center.x - scale * 0.04f, center.y)
+            val tailSpeed = if (fish.escaping || fish.reactingToHit) 32f else 18f
+            val tailSwing = if (fish.escaping || fish.reactingToHit) 0.018f else 0.01f
+            lineTo(center.x - scale * 0.075f, center.y - scale * (0.025f + tailSwing * sin(fish.age * tailSpeed)))
+            lineTo(center.x - scale * 0.075f, center.y + scale * 0.025f)
+            close()
+        }
+        drawPath(tail, Color(0xFFFFA844))
+        val bodyColor = when {
+            fish.reactingToHit -> Color(0xFFFFE2B5)
+            fish.target != null -> Color(0xFFFF7954)
+            else -> Color(0xFFFFC45C)
+        }
+        drawOval(bodyColor, center - Offset(scale * 0.05f, scale * 0.027f), Size(scale * 0.10f, scale * 0.054f))
+        drawCircle(Color.White, scale * 0.009f, center + Offset(scale * 0.028f, -scale * 0.009f))
+        drawCircle(Color(0xFF172C40), scale * 0.0045f, center + Offset(scale * 0.032f, -scale * 0.009f))
+    }
+}

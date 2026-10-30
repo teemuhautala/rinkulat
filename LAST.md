@@ -1,5 +1,54 @@
 # Last session
 
+**Date:** 29.10.2026
+
+**What changed:**
+Bubbles now rise opposite the gravity direction used by rings instead of always toward screen-top. This follows device tilt, respects upside-down layouts, and naturally weakens when the device lies flat. In weightless space levels, bubble buoyancy and liquid-flow motion are scaled to 12% speed. Non-bubble particles retain their existing movement.
+
+**Verification performed:**
+- `env -u ANDROID_SDK_ROOT ./gradlew test assembleDebug` — passes; 65 tests in each variant.
+- New regressions cover upright, inverted, sideways, diagonal and flat device gravity; upside-down layouts; slow motion in all space levels with/without streams; and recycling across all chamber edges.
+- `~/bin/build_apk.sh` — generated `build_output/Rinkulat-debug.apk`.
+
+**Known issues / follow-ups:**
+- Not yet checked on a device. Play-test tilt response and space-level speed.
+
+Previous session:
+
+**Date:** 29.10.2026
+
+**What changed:**
+Reproduced the fish crossing into the peg gap: target selection chose the highest ring across both pegs, even when the other peg was closer. It now chooses the nearest accessible stack, takes its exposed ring, and approaches from the nearer side. That side stays fixed while following the ring.
+
+Removed the misleading one-hit attack retreat. Preserving the original three-hit rule, the first two hits now show a brief body-color flash and faster tail beats while the fish holds its ground. The third hit within one second clears the target, starts the escape swim, and starts the full 30-second cooldown. Roaming fish still evade individual streams and cannot acquire a target while escaping.
+
+Earlier level-6 eligibility, immediate Free-play appearance, halfway Challenge appearance, focused stream/range rules and ten-second pull remain. Rings sink normally until actual fish contact, and can settle again if contact is lost.
+
+**Verification performed:**
+- `env -u ANDROID_SDK_ROOT ./gradlew test assembleDebug` — passes; 62 tests in each variant, including twenty-one fish tests.
+- Reproduced the occupied-pegs approach failure before fixing it. Frame-driven tests now verify outside approaches from either edge with both pegs occupied, and actual button bursts with jet ramp-up: hold ground on hits one/two, retreat on hit three, no reacquisition for 30 seconds.
+- Existing focused-cone, range, ring-pull, reset, moving-peg and cooldown tests pass.
+- `~/bin/build_apk.sh` — generated `build_output/Rinkulat-debug.apk`.
+
+**Known issues / follow-ups:**
+- Not verified on a device. Play-test the nearest-stack behavior and the distinction between hit feedback and successful retreat.
+
+Previous session:
+
+**Date:** 28.10.2026
+
+**What changed:**
+Added the experimental fish to every Challenge level at half time. Animated fish targets caught rings, gives up after three distinct stream contacts in one second, or steadily pulls its target along the peg and drops it from the tip at ten seconds. The pull follows hanging and moving pegs; scaring the fish mid-pull leaves the ring attached to settle again. Both outcomes start 30 seconds of roaming, with faster curved escape from streams. Free play remains unchanged.
+
+**Verification performed:**
+- `env -u ANDROID_SDK_ROOT ./gradlew test assembleDebug` — passes, including seven fish regression tests in both build variants. New full-physics tests verify progressive pull, tip release on normal/hanging/moving pegs, and settling after a mid-pull scare.
+- `~/bin/build_apk.sh` — generated `build_output/Rinkulat-debug.apk`.
+
+**Known issues / follow-ups:**
+- Not play-tested on a device. Tune visibility, burst difficulty and swimming speed.
+
+Previous session:
+
 **Date:** 28.10.2026
 
 **What changed:**

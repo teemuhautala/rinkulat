@@ -69,6 +69,208 @@ class ChamberWorld(
         val mountBottom get() = mountTop + MOUNT_HEIGHT
     }
 
+    class Fish {
+        var x = 0.08f
+        var y = HEIGHT / 2f
+        var heading = 0f
+        var age = 0f
+        var target: Ring? = null
+        var attackTime = 0f
+        var cooldown = 0f
+        internal var pullStartAlong = 0f
+        internal var pullStartTime = 0f
+        internal var pulling = false
+        internal var approachSide = -1f
+        internal var contacts = 0
+        internal val hits = ArrayDeque<Float>()
+        internal var escapeRemaining = 0f
+        internal var escapeX = 0f
+        internal var escapeY = 0f
+        internal var escapeStrength = 0f
+        internal var hitReactionRemaining = 0f
+        val escaping get() = escapeRemaining > 0f
+        val reactingToHit get() = hitReactionRemaining > 0f
+    }
+
+    var fish: Fish? = null
+        private set
+    var fishActive = false
+
+    fun summonFish() {
+        if (layout.number >= FISH_FIRST_LEVEL && fish == null && !won) fish = Fish()
+    }
+
+    /** Keep the side chosen on approach while following the ring and its moving peg. */
+    internal fun fishRingX(ring: Ring): Float =
+        ring.x + (fish?.approachSide ?: -1f) * FISH_RING_OFFSET
+
+    /** Only the central part of a visible cone can affect the fish; distant jets cannot. */
+    internal fun fishJetInfluence(index: Int, x: Float, y: Float): Float {
+        val jet = layout.jets[index]
+        val px = x - jet.x
+        val py = y - jet.y
+        val distance = sqrt(px * px + py * py)
+        val along = px * jet.dirX + py * jet.dirY
+        if (distance > FISH_JET_REACH || along < 0f || along > jet.coneLength) return 0f
+        val across = -px * jet.dirY + py * jet.dirX
+        val coreWidth = jet.coneHalfWidthAt(along) * FISH_JET_CORE_FRACTION
+        val offset = abs(across) / coreWidth
+        if (offset >= 1f) return 0f
+        val influence = jetStrengths[index] * (1f - 0.5f * distance / FISH_JET_REACH) *
+            (1f - 0.5f * offset * offset)
+        return if (influence >= FISH_JET_MIN_INFLUENCE) influence else 0f
+    }
+
+    internal fun stepFish(dt: Float, pressedJets: Int) {
+        val f = fish ?: return
+        if (!fishActive || won) return
+        f.age += dt
+        f.hitReactionRemaining = (f.hitReactionRemaining - dt).coerceAtLeast(0f)
+        f.escapeRemaining = (f.escapeRemaining - dt).coerceAtLeast(0f)
+        f.cooldown = (f.cooldown - dt).coerceAtLeast(0f)
+        if (f.target?.isCaught != true) {
+            f.target = null
+            f.pulling = false
+            f.attackTime = 0f
+        }
+        if (f.target == null && f.cooldown == 0f && !f.escaping) {
+            // Only the exposed ring of each stack is reachable. Choose the nearest
+            // stack, rather than crossing the chamber because its ring sits higher.
+            f.target = pegs.mapIndexedNotNull { index, peg ->
+                rings.filter { it.peg == index }.maxByOrNull { ring ->
+                    val along = -(ring.x - peg.x) * sin(peg.angle) + (ring.y - peg.baseY) * cos(peg.angle)
+                    -along * peg.sink
+                }
+            }.minByOrNull { ring ->
+                val side = if (f.x <= ring.x) -1f else 1f
+                val dx = ring.x + side * FISH_RING_OFFSET - f.x
+                val dy = ring.y - f.y
+                dx * dx + dy * dy
+            }
+            f.target?.let { ring ->
+                f.approachSide = if (f.x <= ring.x) -1f else 1f
+            }
+        }
+        var contacts = 0
+        var pushX = 0f
+        var pushY = 0f
+        var strongestHit = 0f
+        for ((i, j) in layout.jets.withIndex()) {
+            val influence = fishJetInfluence(i, f.x, f.y)
+            if (influence > 0f) {
+                val across = -(f.x - j.x) * j.dirY + (f.y - j.y) * j.dirX
+                if (influence > strongestHit) {
+                    var side = if (across >= 0f) 1f else -1f
+                    // Leave across the cone, slightly downstream. Choose the other side
+                    // if the nearest exit would drive the fish into a chamber wall.
+                    val exitX = f.x - j.dirY * side * FISH_ESCAPE_DISTANCE
+                    val exitY = f.y + j.dirX * side * FISH_ESCAPE_DISTANCE
+                    if (exitX !in 0.06f..(WIDTH - 0.06f) || exitY !in 0.04f..(HEIGHT - 0.04f)) side = -side
+                    f.escapeX = (f.x + (-j.dirY * side + j.dirX * 0.35f) * FISH_ESCAPE_DISTANCE)
+                        .coerceIn(0.06f, WIDTH - 0.06f)
+                    f.escapeY = (f.y + (j.dirX * side + j.dirY * 0.35f) * FISH_ESCAPE_DISTANCE)
+                        .coerceIn(0.04f, HEIGHT - 0.04f)
+                    // Roaming fish evade freely. An attacker holds its ground until
+                    // the third hit, so every attack retreat means a full cooldown.
+                    if (f.target == null) f.escapeRemaining = FISH_ESCAPE_SECONDS
+                    f.escapeStrength = influence
+                }
+                val speed = if (j.big) JET_SPEED else SMALL_JET_SPEED
+                pushX += j.dirX * speed * influence
+                pushY += j.dirY * speed * influence
+                strongestHit = max(strongestHit, influence)
+                if (pressedJets and (1 shl i) != 0) contacts = contacts or (1 shl i)
+            }
+        }
+        if (f.target != null) {
+            val newHits = Integer.bitCount(contacts and f.contacts.inv())
+            repeat(newHits) { f.hits.addLast(f.age) }
+            if (newHits > 0) f.hitReactionRemaining = 0.2f
+            while (f.hits.isNotEmpty() && f.age - f.hits.first() > FISH_HIT_WINDOW) f.hits.removeFirst()
+            if (f.hits.size >= FISH_HITS_REQUIRED) f.escapeRemaining = FISH_ESCAPE_SECONDS
+            f.target?.let { ring ->
+                val dx = fishRingX(ring) - f.x
+                val dy = ring.y - f.y
+                val withinReach = dx * dx + dy * dy <= FISH_GRAB_DISTANCE * FISH_GRAB_DISTANCE
+                if (f.escaping || !withinReach) {
+                    f.pulling = false
+                } else if (!f.pulling) {
+                    // Until actual contact the ring continues to sink under normal physics.
+                    // Re-grabbing after losing contact starts wherever it has since settled.
+                    val peg = pegs[ring.peg]
+                    f.pullStartAlong = -(ring.x - peg.x) * sin(peg.angle) +
+                        (ring.y - peg.baseY) * cos(peg.angle)
+                    f.pullStartTime = f.attackTime
+                    f.pulling = true
+                }
+            }
+            if (f.pulling && f.hits.size < FISH_HITS_REQUIRED) f.target?.let { ring ->
+                f.attackTime += dt
+                val peg = pegs[ring.peg]
+                // Interpolate in the peg's frame so mechanisms carry the pull with them.
+                // Only time spent actually pulling counts toward the ten-second theft.
+                val progress = ((f.attackTime - f.pullStartTime) /
+                    (FISH_ATTACK_SECONDS - f.pullStartTime).coerceAtLeast(dt)).coerceIn(0f, 1f)
+                val tipAlong = peg.tipY - peg.baseY
+                inPegFrame(ring, peg) {
+                    ring.x = peg.x
+                    ring.y = peg.baseY + f.pullStartAlong + (tipAlong - f.pullStartAlong) * progress
+                    ring.vx = 0f
+                    ring.vy = 0f
+                    ring.settled = false
+                }
+            }
+            if (f.hits.size >= FISH_HITS_REQUIRED || f.attackTime >= FISH_ATTACK_SECONDS) {
+                if (f.hits.size < FISH_HITS_REQUIRED) f.target?.let { ring ->
+                    // Let go at the tip with a small outward/sideways nudge, preserving
+                    // the peg's surface velocity. Normal ring physics takes over next step.
+                    val peg = pegs[ring.peg]
+                    val side = if (peg.x < WIDTH / 2f) 1f else -1f
+                    inPegFrame(ring, peg) {
+                        ring.peg = -1
+                        ring.settled = false
+                        ring.vx = side * 0.2f
+                        ring.vy = -peg.sink * 0.2f
+                    }
+                    ring.omega = 3f
+                }
+                f.target = null
+                f.pulling = false
+                // Start the full delay at this scare/theft, not at approach or first hit.
+                f.cooldown = FISH_COOLDOWN_SECONDS
+                f.attackTime = 0f
+                f.hits.clear()
+            }
+        }
+        f.contacts = contacts
+        val target = f.target
+        // Keep fleeing after leaving the stream core. Attacks only retreat on a
+        // successful scare; the target is then cleared for the full cooldown.
+        val dx = when {
+            f.escaping -> f.escapeX - f.x
+            target != null -> fishRingX(target) - f.x
+            else -> 0.5f + 0.34f * sin(f.age * 0.47f) - f.x
+        }
+        val dy = when {
+            f.escaping -> f.escapeY - f.y
+            target != null -> target.y - f.y
+            else -> 0.75f + 0.52f * cos(f.age * 0.31f) - f.y
+        }
+        val desired = kotlin.math.atan2(dy, dx)
+        val turn = kotlin.math.atan2(sin(desired - f.heading), cos(desired - f.heading))
+        f.heading += turn * min(1f, dt * if (f.escaping) FISH_ESCAPE_TURN_RATE else 6f)
+        val distance = sqrt(dx * dx + dy * dy)
+        val speed = when {
+            f.escaping -> min(0.55f + 0.45f * f.escapeStrength, distance * 6f)
+            target != null -> min(0.5f, distance * 4f)
+            else -> 0.2f
+        }
+        // Use only qualifying jets here: the general flow includes distant plumes and return currents.
+        val pushResponse = if (target == null) 0.18f else 0f
+        f.x = (f.x + (cos(f.heading) * speed + pushX * pushResponse) * dt).coerceIn(0.06f, WIDTH - 0.06f)
+        f.y = (f.y + (sin(f.heading) * speed + pushY * pushResponse) * dt).coerceIn(0.04f, HEIGHT - 0.04f)
+    }
+
     class Particle(var x: Float, var y: Float, val size: Float, val isBubble: Boolean)
 
     var layout: LevelLayout = LevelLayout.CLASSIC
@@ -167,7 +369,8 @@ class ChamberWorld(
         collideRings()
         stackCaughtRings()
         for (ring in rings) if (!ring.isCaught) collideWalls(ring)
-        stepParticles(dt)
+        stepParticles(dt, gravityX, gravityY * if (layout.upsideDown) -1f else 1f)
+        stepFish(dt, pressedJets)
 
         // The clock stops only once every ring has slid all the way down onto its stack.
         if (!won && started && rings.all { it.isCaught && it.settled }) won = true
@@ -228,6 +431,8 @@ class ChamberWorld(
 
     /** Scatter a fresh set of [ringCount] rings for [layout] and clear timer and win state. */
     fun reset(ringCount: Int = rings.size, layout: LevelLayout = this.layout) {
+        fish = null
+        fishActive = false
         this.layout = layout
         pegs = createPegs()
         rings = createRings(ringCount)
@@ -666,12 +871,20 @@ class ChamberWorld(
         }
     }
 
-    private fun stepParticles(dt: Float) {
+    private fun stepParticles(dt: Float, gravityX: Float, gravityY: Float) {
         for (p in particles) {
             flowAt(p.x, p.y, flow)
-            val rise = if (p.isBubble) -0.08f else 0.01f
-            p.x += flow[0] * dt
-            p.y += (flow[1] + rise) * dt
+            if (p.isBubble) {
+                // Buoyancy opposes the rings' gravity, not the screen's vertical axis.
+                // Keep in-plane gravity magnitude so a flat device has no artificial rise.
+                // Space bubbles drift slowly even when carried by the liquid flow.
+                val speedScale = if (layout.weightless) WEIGHTLESS_GRAVITY else 1f
+                p.x += (flow[0] - gravityX * BUBBLE_RISE_SPEED) * speedScale * dt
+                p.y += (flow[1] - gravityY * BUBBLE_RISE_SPEED) * speedScale * dt
+            } else {
+                p.x += flow[0] * dt
+                p.y += (flow[1] + 0.01f) * dt
+            }
             if (p.x < 0f) p.x += WIDTH else if (p.x > WIDTH) p.x -= WIDTH
             if (p.y < 0f) {
                 p.y = HEIGHT
@@ -695,8 +908,22 @@ class ChamberWorld(
     }
 
     companion object {
+        const val FISH_FIRST_LEVEL = 6
+        const val FISH_ESCAPE_SECONDS = 0.65f
+        const val FISH_ESCAPE_DISTANCE = 0.35f
+        const val FISH_ESCAPE_TURN_RATE = 18f
+        const val FISH_JET_CORE_FRACTION = 0.75f
+        const val FISH_JET_MIN_INFLUENCE = 0.3f
+        const val FISH_RING_OFFSET = 0.07f
+        const val FISH_GRAB_DISTANCE = 0.045f
+        const val FISH_ATTACK_SECONDS = 10f
+        const val FISH_COOLDOWN_SECONDS = 30f
+        const val FISH_HIT_WINDOW = 1f
+        const val FISH_HITS_REQUIRED = 3
+
         const val WIDTH = 1f
         const val HEIGHT = 1.5f
+        const val FISH_JET_REACH = HEIGHT * 0.7f
         const val DEFAULT_RING_COUNT = 10
         const val RING_COLOR_COUNT = 5
         const val RING_RADIUS = 0.05f
@@ -720,6 +947,7 @@ class ChamberWorld(
         const val MOUNT_HEIGHT = PEG_RADIUS * 9f
         const val MOUNT_CORNER = PEG_RADIUS * 2f
         const val PARTICLE_COUNT = 60
+        const val BUBBLE_RISE_SPEED = 0.08f
 
         /** Pressed-jets mask with every jet held. */
         const val ALL_JETS = -1
