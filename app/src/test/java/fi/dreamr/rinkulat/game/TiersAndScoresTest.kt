@@ -34,16 +34,21 @@ class TiersAndScoresTest {
     }
 
     @Test
-    fun chaptersGiveThemesAndCheckpoints() {
+    fun chaptersGiveThemes() {
         assertEquals(
             List(5) { ThemeId.Orange } + List(5) { ThemeId.Sea } + List(5) { ThemeId.Space } + List(5) { ThemeId.Mechanicals },
             (1..20).map { Tiers.themeFor(it) },
         )
         assertEquals(ThemeId.Mechanicals, Tiers.themeFor(23))
-        assertEquals(listOf(1, 6, 11, 16), (1..16).filter { Tiers.isCheckpoint(it) })
-        assertEquals(listOf(1), Tiers.checkpoints(upTo = 5))
-        assertEquals(listOf(1, 6), Tiers.checkpoints(upTo = 7))
-        assertEquals(listOf(1, 6, 11, 16), Tiers.checkpoints(upTo = 99))
+    }
+
+    @Test
+    fun everyUnlockedLevelCanStartAChallenge() {
+        assertEquals(listOf(1), Tiers.selectableLevels(1))
+        assertEquals((1..5).toList(), Tiers.selectableLevels(5))
+        assertEquals((1..7).toList(), Tiers.selectableLevels(7))
+        assertEquals((1..Tiers.MAX_LEVEL).toList(), Tiers.selectableLevels(99))
+        assertEquals(listOf(1), Tiers.selectableLevels(-1))
     }
 
     @Test

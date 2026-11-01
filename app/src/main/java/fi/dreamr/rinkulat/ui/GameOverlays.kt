@@ -30,6 +30,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -39,6 +40,10 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -136,15 +141,9 @@ private fun WideButton(text: String, primary: Boolean = true, onClick: () -> Uni
         .padding(top = 8.dp),
 )
 
-/**
- * Start state: the two mode buttons over the toy, no dimming. When more than one checkpoint is
- * available, a selector under Challenge picks which one the run starts from.
- */
+/** The two mode buttons over the toy. Both open the shared level grid. */
 @Composable
 fun StartButtons(
-    challengeStart: Int,
-    canChangeCheckpoint: Boolean,
-    onChangeCheckpoint: (delta: Int) -> Unit,
     onChallenge: () -> Unit,
     onFreePlay: () -> Unit,
 ) {
@@ -154,29 +153,6 @@ fun StartButtons(
                 .fillMaxWidth()
                 .height(56.dp)
             ToyButton("Challenge", buttonModifier, onClick = onChallenge)
-            if (canChangeCheckpoint) {
-                Row(
-                    Modifier
-                        .padding(top = 6.dp)
-                        .fillMaxWidth()
-                        .toyPanel(RoundedCornerShape(16.dp)),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    IconButton(onClick = { onChangeCheckpoint(-1) }) {
-                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Previous checkpoint", tint = PanelText)
-                    }
-                    Text(
-                        "Start at level $challengeStart",
-                        Modifier.weight(1f),
-                        color = PanelText,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center,
-                    )
-                    IconButton(onClick = { onChangeCheckpoint(1) }) {
-                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Next checkpoint", tint = PanelText)
-                    }
-                }
-            }
             Spacer(Modifier.height(12.dp))
             ToyButton("Free play", buttonModifier, onClick = onFreePlay)
         }
@@ -184,22 +160,28 @@ fun StartButtons(
 }
 
 /**
- * Free-play level grid: one row per chapter in that chapter's colors. Locked levels are dimmed with a
+ * Shared level grid: one row per chapter in that chapter's colors. Locked levels are dimmed with a
  * lock; they can only be started when [allowLocked] (debug builds).
  */
 @Composable
 fun LevelSelectOverlay(
+    mode: GameMode,
+    resumeLevel: Int,
     tiles: List<LevelTile>,
     allowLocked: Boolean,
     onPick: (Int) -> Unit,
     onClose: () -> Unit,
 ) = OverlayCard {
-    Title("Free play")
+    Title(if (mode == GameMode.Challenge) "Challenge" else "Free play")
+    if (mode == GameMode.Challenge) {
+        WideButton("Continue at level $resumeLevel", onClick = { onPick(resumeLevel) })
+    }
     Text("Levels unlock as you reach them in Challenge", fontSize = 13.sp, color = PanelTextDim, textAlign = TextAlign.Center)
     if (allowLocked) Text("Debug: locked levels playable", fontSize = 12.sp, color = PanelTextDim)
     Spacer(Modifier.height(8.dp))
     Column(
         Modifier
+            .weight(1f, fill = false)
             .heightIn(max = 420.dp)
             .verticalScroll(rememberScrollState()),
     ) {
@@ -215,7 +197,14 @@ fun LevelSelectOverlay(
             val theme = toyThemeFor(Tiers.themeFor(first))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 chapter.forEach { tile ->
-                    LevelTileButton(tile, theme, enabled = tile.unlocked || allowLocked, Modifier.weight(1f)) { onPick(tile.number) }
+                    LevelTileButton(
+                        tile = tile,
+                        theme = theme,
+                        enabled = tile.unlocked || allowLocked,
+                        modifier = Modifier.weight(1f),
+                        showBest = mode == GameMode.FreePlay,
+                        resume = mode == GameMode.Challenge && tile.number == resumeLevel,
+                    ) { onPick(tile.number) }
                 }
                 // Keep tile size even in a short last row.
                 repeat(Tiers.CHAPTER_LENGTH - chapter.size) { Spacer(Modifier.weight(1f)) }
@@ -227,7 +216,15 @@ fun LevelSelectOverlay(
 }
 
 @Composable
-private fun LevelTileButton(tile: LevelTile, theme: ToyTheme, enabled: Boolean, modifier: Modifier, onClick: () -> Unit) {
+private fun LevelTileButton(
+    tile: LevelTile,
+    theme: ToyTheme,
+    enabled: Boolean,
+    modifier: Modifier,
+    showBest: Boolean,
+    resume: Boolean,
+    onClick: () -> Unit,
+) {
     val shape = RoundedCornerShape(12.dp)
     Box(
         modifier
@@ -235,15 +232,17 @@ private fun LevelTileButton(tile: LevelTile, theme: ToyTheme, enabled: Boolean, 
             .alpha(if (tile.unlocked) 1f else 0.55f)
             .clip(shape)
             .background(Brush.verticalGradient(listOf(theme.liquidTop, theme.liquidBottom)))
-            .border(2.dp, CaseEdge.copy(alpha = 0.8f), shape)
+            .border(2.dp, if (resume) PanelText else CaseEdge.copy(alpha = 0.8f), shape)
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text("${tile.number}", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = PanelText)
-            if (tile.unlocked) {
+            if (resume) {
+                Text("Resume", fontSize = 10.sp, color = PanelText, maxLines = 1)
+            } else if (tile.unlocked && showBest) {
                 Text(tile.bestMillis?.let { formatMillis(it) } ?: "—", fontSize = 10.sp, color = PanelText, maxLines = 1)
-            } else {
+            } else if (!tile.unlocked) {
                 Icon(Icons.Default.Lock, contentDescription = "Locked", tint = PanelText, modifier = Modifier.size(14.dp))
             }
         }
@@ -265,7 +264,7 @@ fun PhaseOverlay(
     onNameChange: (String) -> Unit,
 ) {
     when (phase) {
-        GamePhase.Menu, GamePhase.Playing, GamePhase.LevelSelect -> Unit
+        GamePhase.Menu, GamePhase.Playing, GamePhase.LevelSelect, GamePhase.Settings -> Unit
         is GamePhase.LevelIntro -> OverlayCard {
             Title("Level ${phase.level}")
             Text(phase.title, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = PanelText)
@@ -431,3 +430,40 @@ private fun ScoreRow(index: Int, entry: ScoreEntry, tab: GameMode, highlighted: 
 fun formatTime(seconds: Int) = "%d:%02d".format(seconds / 60, seconds % 60)
 
 private fun formatMillis(millis: Long) = "%d:%02d.%d".format(millis / 60_000, millis / 1000 % 60, millis / 100 % 10)
+
+@Composable
+fun SettingsOverlay(onReset: () -> Unit, onClose: () -> Unit) {
+    var confirmReset by rememberSaveable { mutableStateOf(false) }
+    var resetDone by rememberSaveable { mutableStateOf(false) }
+    OverlayCard {
+        Title("Settings")
+        Spacer(Modifier.height(16.dp))
+        Text(
+            "Reset unlocked levels, Challenge progress, all scores and Free-play best times. Your player name is kept.",
+            color = PanelText,
+            textAlign = TextAlign.Center,
+        )
+        WideButton("Reset progress and scores", primary = false, onClick = { confirmReset = true })
+        if (resetDone) {
+            Text("Progress and scores reset. Start again at level 1.", color = PanelText, textAlign = TextAlign.Center)
+        }
+        WideButton("Back", onClick = onClose)
+    }
+    if (confirmReset) {
+        AlertDialog(
+            onDismissRequest = { confirmReset = false },
+            title = { Text("Reset progress and scores?") },
+            text = { Text("All unlocked levels, remembered progress, scores and best times will be removed. This cannot be undone.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    onReset()
+                    confirmReset = false
+                    resetDone = true
+                }) { Text("Reset") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmReset = false }) { Text("Cancel") }
+            },
+        )
+    }
+}

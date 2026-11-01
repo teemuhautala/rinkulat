@@ -10,10 +10,10 @@ Package: `fi.dreamr.rinkulat` · single-module Compose app (`:app`), portrait on
 - `game/GameViewModel.kt` — owns the world, mode (free play / challenge) and phase state machine (start, level intro, playing, level complete, run over, free-play won), countdown, scoring and score lists; a `frame` counter drives canvas redraws.
 - `game/TiltSensor.kt` — `rememberTiltReading()`: gravity sensor (accelerometer fallback) converted to screen-axis gravity in g units.
 - `game/LevelLayout.kt` — level mechanics only: jets (nozzle + direction), obstacle, current and upside-down flag. `LEVELS` lists every level with its map `number`.
-- `game/Tiers.kt` — map rules: chapters of 5 levels (theme id, rings and seconds per level), checkpoints (1, 6, 11, …), level lookup by number, level score.
-- `game/ScoreRepository.kt` — SharedPreferences `rinkulat_scores`: top-10 lists with player names (challenge points; free-play times per level), last player name, highest level reached (unlocks) and best free-play time per level.
+- `game/Tiers.kt` — map rules: chapters of 5 levels (theme id, rings and seconds per level), unlocked starting levels, level lookup by number, level score.
+- `game/ScoreRepository.kt` — SharedPreferences `rinkulat_scores`: top-10 lists with player names (challenge points; free-play times per level), last player name, highest level reached (unlocks) best free-play time per level and the remembered Challenge level.
 - `ui/theme/Theme.kt` — `ToyTheme` per `ThemeId` (liquid, button, particle colors, scenery), provided through `LocalToyTheme`.
-- `ui/GameOverlays.kt` — start buttons with checkpoint selector, free-play level grid, toy-styled level/result cards, scores list.
+- `ui/GameOverlays.kt` — start buttons, shared Challenge/Free-play level grid, Settings/reset confirmation, toy-styled level/result cards and scores list.
 - `ui/AdBanner.kt` — AdMob banner shown at the bottom of the start screen and free-play level grid (sample IDs for now).
 - `ui/RinkulatScreen.kt` — frame loop (`withFrameNanos`), HUD, toy case, chamber Canvas rendering, push button, win overlay.
 
@@ -32,8 +32,10 @@ Package: `fi.dreamr.rinkulat` · single-module Compose app (`:app`), portrait on
 
 ## Progression
 
-- **Challenge:** a run starts from a checkpoint (first level of a chapter: 1, 6, …), chosen with the arrows under the Challenge button once more than one is unlocked. Clearing a level unlocks the next one (not in practice runs).
+- **Challenge:** a run can start from any unlocked level, chosen in the same chapter grid used by Free play. The Challenge grid marks the remembered level and offers a Continue button. The app remembers the current level across restarts; clearing it immediately saves the next level as the continuation point (the final level stays selected after completion). Quitting or losing keeps the current level. Retry restarts the current level with fresh rings, timer and run score; directly continuing to the next level retains the run score. Clearing a level unlocks the next one. Debug swipe practice runs do not save progress or scores. Free play does not change the remembered Challenge level. Existing saves initially select their highest unlocked level.
 - **Free play:** opens a level grid; only levels reached in Challenge can be played (10 rings, timer from first catch). Tiles show the best time per level. Debug builds (`FLAG_DEBUGGABLE`) can start locked levels and swipe the chamber to change level.
+
+The top-right Settings gear on the start screen opens a reset view. After confirmation, Reset progress and scores clears unlocked levels, remembered Challenge progress, both score lists and all Free-play best times, returning to level 1. It preserves the player name. Cancelling leaves records intact.
 
 ## Chapters
 
@@ -76,7 +78,7 @@ Buttons accumulate through levels 1–15. Mechanicals (16–20) has the full set
 | 19 | full set | Mechanicals: pegs swing while rising/falling in opposite phases |
 | 20 | full set | Mechanicals: shorter pegs, continuous 360° rotation, 45° phase offset, opposite vertical movement |
 
-Mechanicals uses a brass/copper theme with animated decorative gears, pipework, panel rivets and a pressure gauge. Levels 16–19 rock pegs ±0.48 radians around their bases and/or slide them ±0.10 world units horizontally. Levels 19 and 20 also move their pegs vertically ±0.10 world units in opposite phases, with an approximately 8.4-second cycle. Level 20 uses horizontally fixed bases and shorter 0.18-unit pegs (normally 0.245), rotating continuously in the same direction at 0.4 radians/s (about 15.7 seconds per revolution), 45° apart. Their full swept outlines, including mounts, stay clear of each other and the chamber walls; the shorter pegs still hold 9 rings each. Catches, shaft/mount collisions, ring orientation and stacking use the moving peg frame; caught rings travel with the pegs and can still be pumped off. Restart resets the mechanism phase. Level 16 is the new chapter checkpoint.
+Mechanicals uses a brass/copper theme with animated decorative gears, pipework, panel rivets and a pressure gauge. Levels 16–19 rock pegs ±0.48 radians around their bases and/or slide them ±0.10 world units horizontally. Levels 19 and 20 also move their pegs vertically ±0.10 world units in opposite phases, with an approximately 8.4-second cycle. Level 20 uses horizontally fixed bases and shorter 0.18-unit pegs (normally 0.245), rotating continuously in the same direction at 0.4 radians/s (about 15.7 seconds per revolution), 45° apart. Their full swept outlines, including mounts, stay clear of each other and the chamber walls; the shorter pegs still hold 9 rings each. Catches, shaft/mount collisions, ring orientation and stacking use the moving peg frame; caught rings travel with the pegs and can still be pumped off. Restart resets the mechanism phase. Level 16 begins the Mechanicals chapter.
 
 Attracting obstacles (12–15) pull free rings within `ATTRACT_REACH` of their surface, up to `ATTRACT_ACCEL` at contact; a faint halo shows the range. The pull bends passing rings but jets free a ring resting against one.
 

@@ -88,9 +88,23 @@ class ScoreRepository(context: Context) {
 
     fun saveHighestLevelReached(level: Int) = prefs.edit().putInt(KEY_HIGHEST_LEVEL_REACHED, level).apply()
 
+    /** Resume at the highest unlock for saves created before per-level continuation. */
+    fun lastChallengeLevel() = prefs.getInt(KEY_LAST_CHALLENGE_LEVEL, highestLevelReached())
+
+    fun saveLastChallengeLevel(level: Int) = prefs.edit().putInt(KEY_LAST_CHALLENGE_LEVEL, level).apply()
+
     fun freePlayBests() = BestTimes.decode(prefs.getString(KEY_FREE_PLAY_BESTS, null))
 
     fun saveFreePlayBests(bests: Map<Int, Long>) = prefs.edit().putString(KEY_FREE_PLAY_BESTS, BestTimes.encode(bests)).apply()
+
+    /** Remove gameplay records together, preserving the player name and unrelated preferences. */
+    fun resetProgressAndScores() = prefs.edit()
+        .remove(KEY_HIGHEST_LEVEL_REACHED)
+        .remove(KEY_LAST_CHALLENGE_LEVEL)
+        .remove(KEY_TIER_SCORES)
+        .remove(KEY_FREE_PLAY_TIMES)
+        .remove(KEY_FREE_PLAY_BESTS)
+        .apply()
 
     private companion object {
         const val PREFS_NAME = "rinkulat_scores"
@@ -98,6 +112,7 @@ class ScoreRepository(context: Context) {
         const val KEY_FREE_PLAY_TIMES = "free_play_times"
         const val KEY_HIGHEST_LEVEL_REACHED = "highest_level_reached"
         const val KEY_FREE_PLAY_BESTS = "free_play_best"
+        const val KEY_LAST_CHALLENGE_LEVEL = "last_challenge_level"
         const val KEY_PLAYER_NAME = "player_name"
     }
 }

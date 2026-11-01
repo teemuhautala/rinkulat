@@ -1,5 +1,40 @@
 # Last session
 
+**Date:** 30.10.2026
+
+**What changed:**
+Challenge and Free play now open the same chapter-based level grid. Removed the main-screen level selector. Challenge has a Continue button for the remembered level and marks that tile; selecting any available tile opens its Challenge intro. Free play retains its best-time tiles and starts immediately. Normal-build locks and debug access remain.
+
+Added a Settings gear at the top right of the start screen. Settings offers a combined progress/score reset with a confirmation dialog and completion message. Reset removes unlocks, remembered Challenge level, both score lists and Free-play best times in one preference edit, resets in-memory gameplay state, and preserves the player name. Cancelling or leaving Settings does not reset records. Back navigation returns from grids/Settings to the menu; Settings does not display an ad banner. The grid scroll area shrinks to leave room for Continue and Back on shorter screens.
+
+**Verification performed:**
+- `env -u ANDROID_SDK_ROOT ./gradlew test assembleDebug` — passes; 74 tests in each variant.
+- Regression tests cover both grid routes, locked/invalid selection, remembered-level persistence, leaving Settings unchanged, and reset in memory and after repository/ViewModel reload, including pending score-name cleanup and preserved player name.
+- `~/bin/build_apk.sh` — generated `build_output/Rinkulat-debug.apk`.
+
+**Known issues / follow-ups:**
+- Not checked on a device. Verify grid sizing, Settings access and reset confirmation/cancellation visually.
+
+Previous session:
+
+**Date:** 30.10.2026
+
+**What changed:**
+Challenge start arrows now select every unlocked level instead of chapter checkpoints. Starting a level remembers it across app restarts; winning immediately remembers the next level, capped at the final level. Returning to the menu restores that continuation point, and browsing arrows alone does not save a new position. Retry restarts the current level with fresh rings, timer and run score; directly advancing retains the current run score. Existing saves default to their highest unlocked level. The new `last_challenge_level` preference leaves all existing keys and saved scores intact.
+
+Free play remains limited to unlocked levels in normal builds and never changes Challenge continuation. Debug selection and swiping remain available; swipe practice runs cannot change saved progress or unlocks, including after Retry. Five-level chapters still define themes and difficulty. Added Robolectric tests for the ViewModel and preference persistence.
+
+**Verification performed:**
+- `env -u ANDROID_SDK_ROOT ./gradlew test assembleDebug` — passes; 72 tests in each variant.
+- Regression coverage includes individual selection/wrapping, save fallback and bounds, quitting/losing/retry, immediate continuation after a win, score accumulation on Next, earlier-level replay, final completion, Free-play locks and isolation, and debug practice retry.
+- `~/bin/build_apk.sh` — generated `build_output/Rinkulat-debug.apk`.
+
+**Known issues / follow-ups:**
+- Not checked on a device. Play-test selection and continuation after force-closing the app.
+- Continuation restores the level only; physics, countdown and accumulated run score are not restored.
+
+Previous session:
+
 **Date:** 29.10.2026
 
 **What changed:**

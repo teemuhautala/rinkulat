@@ -18,8 +18,8 @@ data class Chapter(
 )
 
 /**
- * Map rules for challenge mode. Levels are grouped into chapters of five; the first level of each chapter
- * is a checkpoint a run can start from. A level's mechanics come from [LevelLayout.LEVELS] by number,
+ * Map rules for challenge mode. Levels are grouped into chapters of five for theme and difficulty.
+ * Runs can start at any unlocked level. A level's mechanics come from [LevelLayout.LEVELS] by number,
  * everything else from its chapter, so levels can be moved by renumbering them.
  */
 object Tiers {
@@ -53,10 +53,8 @@ object Tiers {
 
     fun shakeFor(level: Int) = (chapterFor(level) ?: CHAPTERS.last()).shake
 
-    fun isCheckpoint(level: Int) = level >= 1 && indexInChapter(level) == 0
-
-    /** Checkpoint levels (1, 6, 11, …) up to [upTo], never past the last level. */
-    fun checkpoints(upTo: Int): List<Int> = (1..minOf(upTo, MAX_LEVEL) step CHAPTER_LENGTH).toList()
+    /** Every unlocked level, bounded by the current map. */
+    fun selectableLevels(upTo: Int): List<Int> = (1..upTo.coerceIn(1, MAX_LEVEL)).toList()
 
     /** Jets, obstacle, current and gravity for a level. */
     fun layoutFor(level: Int): LevelLayout = LevelLayout.LEVELS.first { it.number == level }

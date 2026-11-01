@@ -17,15 +17,16 @@ sealed interface GamePhase {
     data object Menu : GamePhase
     data object Playing : GamePhase
 
-    /** Free-play level grid, opened from the start screen. */
+    /** Shared level grid, opened for either game mode. */
     data object LevelSelect : GamePhase
+    data object Settings : GamePhase
     data class LevelIntro(val level: Int, val rings: Int, val seconds: Int, val title: String) : GamePhase
     data class LevelComplete(val level: Int, val levelScore: Int, val totalScore: Int) : GamePhase
 
     /** A challenge run ended, by running out of time or by clearing the last level. */
     data class RunOver(
         val totalScore: Int,
-        /** Checkpoint the run started from. */
+        /** Level the run started from. */
         val startLevel: Int,
         val levelsCleared: Int,
         val allCleared: Boolean,
@@ -36,7 +37,7 @@ sealed interface GamePhase {
     data class FreePlayWon(val seconds: Float, val rank: Int?, val level: Int, val newBest: Boolean) : GamePhase
 }
 
-/** One tile of the free-play level grid. */
+/** One tile of the shared level grid. */
 data class LevelTile(val number: Int, val unlocked: Boolean, val bestMillis: Long?)
 
 data class HudState(
@@ -87,18 +88,21 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     var freePlayBests by mutableStateOf(scores.freePlayBests())
         private set
 
-    /** Checkpoint the next challenge run starts from, chosen on the start screen. */
-    var challengeStart by mutableIntStateOf(1)
+    /** Level the next challenge run starts from, chosen from the Challenge grid. */
+    var challengeStart by mutableIntStateOf(restoredChallengeLevel())
         private set
 
-    val selectableCheckpoints get() = Tiers.checkpoints(if (isDebug) Tiers.MAX_LEVEL else highestReached)
+    var levelSelectMode by mutableStateOf(GameMode.FreePlay)
+        private set
+
+    val selectableChallengeLevels get() = Tiers.selectableLevels(if (isDebug) Tiers.MAX_LEVEL else highestReached)
 
     val levelTiles get() = (1..Tiers.MAX_LEVEL).map { LevelTile(it, it <= highestReached, freePlayBests[it]) }
 
-    /** Theme of whatever is on screen: the chosen checkpoint at the start, otherwise the level being played. */
+    /** Theme of whatever is on screen: the chosen level at the start, otherwise the level being played. */
     val themeId get() = Tiers.themeFor(
         when {
-            phase == GamePhase.Menu || phase == GamePhase.LevelSelect -> challengeStart
+            phase == GamePhase.Menu || phase == GamePhase.LevelSelect || phase == GamePhase.Settings -> challengeStart
             mode == GameMode.FreePlay -> freePlayLevel
             else -> level
         },
@@ -167,24 +171,64 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         if (next != hud) hud = next
     }
 
-    fun openLevelSelect() {
+    fun openLevelSelect(selectedMode: GameMode = GameMode.FreePlay) {
         commitName()
+        levelSelectMode = selectedMode
+        challengeStart = restoredChallengeLevel()
         scoresVisible = false
         phase = GamePhase.LevelSelect
     }
 
     /** Start free play on [number] if it's unlocked (any level in debug builds). */
     fun pickFreePlayLevel(number: Int) {
-        if (!isDebug && number > highestReached) return
+        if (number !in 1..Tiers.MAX_LEVEL || (!isDebug && number > highestReached)) return
         freePlayLevel = number
         startFreePlay()
     }
 
-    /** Step the start-screen checkpoint selector to the next/previous available checkpoint (wrapping). */
-    fun changeCheckpoint(delta: Int) {
-        val options = selectableCheckpoints
-        val index = options.indexOf(challengeStart).coerceAtLeast(0)
-        challengeStart = options[(index + delta).mod(options.size)]
+    fun pickChallengeLevel(number: Int) {
+        if (number !in selectableChallengeLevels) return
+        challengeStart = number
+        startChallenge()
+    }
+
+    fun pickLevel(number: Int) = when (levelSelectMode) {
+        GameMode.Challenge -> pickChallengeLevel(number)
+        GameMode.FreePlay -> pickFreePlayLevel(number)
+    }
+
+    fun openSettings() {
+        if (phase != GamePhase.Menu && phase != GamePhase.LevelSelect) return
+        commitName()
+        scoresVisible = false
+        phase = GamePhase.Settings
+    }
+
+    /** Called only after the player confirms the reset in Settings. Keep their saved name. */
+    fun resetProgressAndScores() {
+        if (phase != GamePhase.Settings) return
+        scores.resetProgressAndScores()
+        highestReached = 1
+        challengeStart = 1
+        freePlayLevel = 1
+        level = 1
+        runStartLevel = 1
+        totalScore = 0
+        timeLeft = 0f
+        practiceRun = false
+        challengeScores = emptyList()
+        freePlayTimes = emptyList()
+        freePlayBests = emptyMap()
+        latestEntry = null
+        namingEntry = false
+        scoresLevel = 1
+        scoresTab = GameMode.Challenge
+        scoresVisible = false
+        mode = GameMode.FreePlay
+        levelSelectMode = GameMode.FreePlay
+        loadLevel(FREE_PLAY_RINGS, 1)
+        layout = world.layout
+        hud = currentHud()
     }
 
     fun startFreePlay() {
@@ -233,12 +277,13 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         totalScore = 0
         practiceRun = false
         scoresVisible = false
-        if (challengeStart !in selectableCheckpoints) challengeStart = 1
+        if (challengeStart !in selectableChallengeLevels) challengeStart = 1
         runStartLevel = challengeStart
         showLevelIntro(challengeStart)
     }
 
     fun beginLevel() {
+        if (!practiceRun) rememberChallengeLevel(level)
         timeLeft = Tiers.secondsFor(level).toFloat()
         phase = GamePhase.Playing
     }
@@ -246,10 +291,22 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     fun nextLevel() = showLevelIntro(level + 1)
 
     /** Restart whatever mode was being played. */
-    fun playAgain() = if (mode == GameMode.Challenge) startChallenge() else startFreePlay()
+    fun playAgain() {
+        if (mode == GameMode.FreePlay) {
+            startFreePlay()
+        } else {
+            commitName()
+            totalScore = 0
+            runStartLevel = level
+            scoresVisible = false
+            // A debug swipe must remain practice even after restarting.
+            showLevelIntro(level)
+        }
+    }
 
     fun openMenu() {
         commitName()
+        challengeStart = restoredChallengeLevel()
         scoresVisible = false
         phase = GamePhase.Menu
     }
@@ -297,6 +354,14 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         latestEntry = listMode to renamed
     }
 
+    private fun restoredChallengeLevel(): Int = scores.lastChallengeLevel()
+        .coerceIn(1, if (isDebug) Tiers.MAX_LEVEL else highestReached)
+
+    private fun rememberChallengeLevel(number: Int) {
+        challengeStart = number.coerceIn(1, Tiers.MAX_LEVEL)
+        scores.saveLastChallengeLevel(challengeStart)
+    }
+
     private fun showLevelIntro(newLevel: Int) {
         level = newLevel
         loadLevel(Tiers.ringsFor(level), level)
@@ -311,6 +376,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             highestReached = level + 1
             scores.saveHighestLevelReached(highestReached)
         }
+        if (!practiceRun) rememberChallengeLevel((level + 1).coerceAtMost(Tiers.MAX_LEVEL))
         if (level >= Tiers.MAX_LEVEL) {
             finishRun(allCleared = true)
         } else {
@@ -365,7 +431,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun currentHud(): HudState {
-        val atStart = phase == GamePhase.Menu || phase == GamePhase.LevelSelect
+        val atStart = phase == GamePhase.Menu || phase == GamePhase.LevelSelect || phase == GamePhase.Settings
         val tiers = mode == GameMode.Challenge && !atStart
         val freePlay = mode == GameMode.FreePlay && !atStart
         val seconds = when {

@@ -1,5 +1,6 @@
 package fi.dreamr.rinkulat.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -30,6 +31,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
@@ -119,7 +121,10 @@ fun RinkulatScreen(viewModel: GameViewModel = viewModel()) {
 @Composable
 private fun GameContent(viewModel: GameViewModel, pressedJets: Int, onJetPressChange: (jet: Int, down: Boolean) -> Unit) {
     val phase = viewModel.phase
-    val atStart = phase == GamePhase.Menu || phase == GamePhase.LevelSelect
+    val atStart = phase == GamePhase.Menu || phase == GamePhase.LevelSelect || phase == GamePhase.Settings
+    BackHandler(enabled = viewModel.scoresVisible || phase == GamePhase.LevelSelect || phase == GamePhase.Settings) {
+        if (viewModel.scoresVisible) viewModel.hideScores() else viewModel.openMenu()
+    }
     Column(
         Modifier
             .fillMaxSize()
@@ -130,7 +135,7 @@ private fun GameContent(viewModel: GameViewModel, pressedJets: Int, onJetPressCh
         Box(Modifier.weight(1f)) {
             GameLayers(viewModel, phase, atStart, pressedJets, onJetPressChange)
         }
-        if (atStart) {
+        if (atStart && phase != GamePhase.Settings) {
             AdBanner(Modifier.padding(bottom = 8.dp))
         }
     }
@@ -157,6 +162,7 @@ private fun BoxScope.GameLayers(
             onRestart = viewModel::startFreePlay,
             onHome = viewModel::openMenu,
             onScores = { viewModel.showScores() },
+            onSettings = viewModel::openSettings,
         )
         Spacer(Modifier.height(12.dp))
         ToyCase(
@@ -171,27 +177,29 @@ private fun BoxScope.GameLayers(
     }
     if (phase == GamePhase.Menu && !viewModel.scoresVisible) {
         StartButtons(
-            challengeStart = viewModel.challengeStart,
-            canChangeCheckpoint = viewModel.selectableCheckpoints.size > 1,
-            onChangeCheckpoint = viewModel::changeCheckpoint,
-            onChallenge = viewModel::startChallenge,
-            onFreePlay = viewModel::openLevelSelect,
+            onChallenge = { viewModel.openLevelSelect(GameMode.Challenge) },
+            onFreePlay = { viewModel.openLevelSelect(GameMode.FreePlay) },
         )
     }
     if (phase == GamePhase.LevelSelect) {
         LevelSelectOverlay(
+            mode = viewModel.levelSelectMode,
+            resumeLevel = viewModel.challengeStart,
             tiles = viewModel.levelTiles,
             allowLocked = viewModel.isDebug,
-            onPick = viewModel::pickFreePlayLevel,
+            onPick = viewModel::pickLevel,
             onClose = viewModel::openMenu,
         )
+    }
+    if (phase == GamePhase.Settings) {
+        SettingsOverlay(onReset = viewModel::resetProgressAndScores, onClose = viewModel::openMenu)
     }
     PhaseOverlay(
         phase = phase,
         onBeginLevel = viewModel::beginLevel,
         onNextLevel = viewModel::nextLevel,
         onPlayAgain = viewModel::playAgain,
-        onChooseLevel = viewModel::openLevelSelect,
+        onChooseLevel = { viewModel.openLevelSelect(viewModel.mode) },
         namingEntry = viewModel.namingEntry,
         playerName = viewModel.playerName,
         onNameChange = viewModel::updatePlayerName,
@@ -220,6 +228,7 @@ private fun Hud(
     onRestart: () -> Unit,
     onHome: () -> Unit,
     onScores: () -> Unit,
+    onSettings: () -> Unit,
 ) {
     // Fixed height and widths so the chamber below never changes size between levels.
     Row(
@@ -267,6 +276,9 @@ private fun Hud(
             if (atStart) {
                 IconButton(onClick = onScores) {
                     Icon(Icons.Default.Star, contentDescription = "Scores", tint = PanelText)
+                }
+                IconButton(onClick = onSettings) {
+                    Icon(Icons.Default.Settings, contentDescription = "Settings", tint = PanelText)
                 }
             } else {
                 if (showRestart) {
