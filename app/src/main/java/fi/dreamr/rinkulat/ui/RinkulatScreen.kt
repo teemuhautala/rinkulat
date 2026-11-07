@@ -12,6 +12,7 @@ import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -62,6 +63,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -131,12 +133,12 @@ private fun GameContent(viewModel: GameViewModel, pressedJets: Int, onJetPressCh
             .background(Backdrop)
             .systemBarsPadding(),
     ) {
-        // Overlays stay inside this box so they never cover the ad banner below it.
+        if (atStart && phase != GamePhase.Settings) {
+            AdBanner(Modifier.padding(top = 8.dp))
+        }
+        // Overlays stay inside this box so they never cover the ad banner above it.
         Box(Modifier.weight(1f)) {
             GameLayers(viewModel, phase, atStart, pressedJets, onJetPressChange)
-        }
-        if (atStart && phase != GamePhase.Settings) {
-            AdBanner(Modifier.padding(bottom = 8.dp))
         }
     }
 }
@@ -233,7 +235,6 @@ private fun Hud(
     // Fixed height and widths so the chamber below never changes size between levels.
     Row(
         Modifier
-            .widthIn(max = 480.dp)
             .fillMaxWidth()
             .height(60.dp)
             .toyPanel(RoundedCornerShape(20.dp))
@@ -313,49 +314,65 @@ private fun ToyCase(
     val topJets = indexedJets.filter { it.value.fromTop }
     val bottomJets = indexedJets.filterNot { it.value.fromTop }
 
-    // Both strips are always shown at the same size, so the chamber never changes between levels.
-    @Composable
-    fun Strip(jets: List<IndexedValue<Jet>>) = ButtonStrip(
-        jets = jets,
-        pressedJets = pressedJets,
-        onJetPressChange = onJetPressChange,
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(70.dp),
-    )
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        val casePadding = 14.dp
+        val stripGap = 10.dp
+        // Tall screens (tablets) get larger buttons; phones stay at the 70 dp minimum.
+        val stripHeight = (maxHeight * 0.08f).coerceAtLeast(70.dp)
+        val innerWidth = maxWidth - casePadding * 2
+        val chamberHeight = maxHeight - casePadding * 2 - stripHeight * 2 - stripGap * 2
+        val chamberWidth = (chamberHeight * (ChamberWorld.WIDTH / ChamberWorld.HEIGHT)).coerceAtMost(innerWidth)
+        // Height limits the chamber on wide screens: match its width so buttons sit over their nozzles,
+        // unless that would squeeze the buttons on short phones.
+        val stripWidth = chamberWidth.coerceAtLeast(innerWidth.coerceAtMost(MIN_STRIP_WIDTH))
 
-    Column(
-        modifier
-            .widthIn(max = 480.dp)
-            .fillMaxWidth()
-            .clip(caseShape)
-            .background(Brush.verticalGradient(listOf(theme.liquidTop, theme.liquidBottom)))
-            .border(6.dp, CaseEdge.copy(alpha = 0.7f), caseShape)
-            .padding(14.dp),
-    ) {
-        Strip(topJets)
-        Spacer(Modifier.height(10.dp))
-        // Keep the chamber at the simulation's aspect ratio so walls, jets and the center line up with what's drawn.
-        Box(
+        // Both strips are always shown at the same size, so the chamber never changes between levels.
+        @Composable
+        fun Strip(jets: List<IndexedValue<Jet>>) = ButtonStrip(
+            jets = jets,
+            pressedJets = pressedJets,
+            onJetPressChange = onJetPressChange,
+            maxButtonSize = stripHeight - 12.dp,
+            modifier = Modifier
+                .width(stripWidth)
+                .height(stripHeight),
+        )
+
+        Column(
             Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-            contentAlignment = Alignment.Center,
+                .fillMaxSize()
+                .clip(caseShape)
+                .background(Brush.verticalGradient(listOf(theme.liquidTop, theme.liquidBottom)))
+                .border(6.dp, CaseEdge.copy(alpha = 0.7f), caseShape)
+                .padding(casePadding),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Chamber(
-                world = world,
-                theme = theme,
-                frame = frame,
-                modifier = Modifier
-                    .aspectRatio(ChamberWorld.WIDTH / ChamberWorld.HEIGHT, matchHeightConstraintsFirst = true)
-                    .clip(RoundedCornerShape(24.dp))
-                    .then(if (onSwipe != null) Modifier.swipeLevels(onSwipe) else Modifier),
-            )
+            Strip(topJets)
+            Spacer(Modifier.height(stripGap))
+            // Keep the chamber at the simulation's aspect ratio so walls, jets and the center line up with what's drawn.
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center,
+            ) {
+                Chamber(
+                    world = world,
+                    theme = theme,
+                    frame = frame,
+                    modifier = Modifier
+                        .aspectRatio(ChamberWorld.WIDTH / ChamberWorld.HEIGHT, matchHeightConstraintsFirst = true)
+                        .clip(RoundedCornerShape(24.dp))
+                        .then(if (onSwipe != null) Modifier.swipeLevels(onSwipe) else Modifier),
+                )
+            }
+            Spacer(Modifier.height(stripGap))
+            Strip(bottomJets)
         }
-        Spacer(Modifier.height(10.dp))
-        Strip(bottomJets)
     }
 }
+
+private val MIN_STRIP_WIDTH = 340.dp
 
 /** Horizontal swipe: left goes to the next level (+1), right to the previous (-1). */
 private fun Modifier.swipeLevels(onSwipe: (delta: Int) -> Unit) = pointerInput(onSwipe) {
@@ -374,6 +391,7 @@ private fun ButtonStrip(
     jets: List<IndexedValue<Jet>>,
     pressedJets: Int,
     onJetPressChange: (jet: Int, down: Boolean) -> Unit,
+    maxButtonSize: Dp,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -393,7 +411,7 @@ private fun ButtonStrip(
             ) {
                 val buttonModifier = Modifier
                     .padding(4.dp)
-                    .widthIn(max = 58.dp)
+                    .widthIn(max = maxButtonSize)
                     .fillMaxWidth()
                     .aspectRatio(1f)
                 // Unused slots stay empty but keep their space, so buttons don't move between levels.

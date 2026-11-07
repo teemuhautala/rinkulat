@@ -23,3 +23,5 @@
 - Play-test the level 6+ fish in Challenge and Free play: nearest-stack/nearer-side approach and stream coverage from center/quarter buttons throughout the lift, the 30-second wait after a successful three-hit scare, sinking rings during approach and loss of contact, first-two-hit feedback versus third-hit retreat, focused-burst difficulty, the stronger 0.65-second escape reaction, the 70%-height range cutoff, visibility, swimming speed, ring drops and moving-peg targeting.
 
 - Play-test bubble buoyancy while tilting/rotating the device and the slow 12% bubble motion in space levels.
+
+- Android 16+ large screens (sw ≥ 600 dp, targetSdk 36) ignore `screenOrientation="portrait"`, so the app can run in landscape there, where the height-limited chamber is small. Not checked on such a device; decide whether to add a landscape layout or opt out.

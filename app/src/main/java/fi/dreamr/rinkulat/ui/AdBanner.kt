@@ -1,11 +1,13 @@
 package fi.dreamr.rinkulat.ui
 
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.google.android.gms.ads.AdRequest
 import com.google.android.gms.ads.AdSize
@@ -26,5 +28,11 @@ fun AdBanner(modifier: Modifier = Modifier) {
         }
     }
     DisposableEffect(adView) { onDispose { adView.destroy() } }
-    AndroidView(factory = { adView }, modifier = modifier.fillMaxWidth())
+    // Reserve the height up front so a late-loading ad can't push the controls below it out from under a tap.
+    AndroidView(
+        factory = { adView },
+        modifier = modifier
+            .fillMaxWidth()
+            .height(AdSize.BANNER.height.dp),
+    )
 }

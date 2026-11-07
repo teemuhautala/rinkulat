@@ -1,5 +1,25 @@
 # Last session
 
+**Date:** 04.11.2026
+
+**What changed:**
+Fixed the narrow layout on tablets. The HUD and toy case were capped at 480 dp; they now fill the screen width. The chamber keeps its 2:3 ratio and is limited by height, so on the 800×1280 dp Lenovo it grows to about 585 dp wide inside a full-width case. Button strips take 8% of the case height (70 dp minimum, so phones are unchanged) and match the chamber width so buttons stay over their nozzles, except where that would go below 340 dp on short phones. Overlay cards keep their 420 dp cap.
+
+Moved the ad banner from the bottom to the top of the start screen and level grid. Its 50 dp height is now reserved before the ad loads, so the HUD does not shift under a tap. Settings and gameplay still have no banner, so the HUD moves up when entering them.
+
+**Verification performed:**
+- `env -u ANDROID_SDK_ROOT ./gradlew test assembleDebug` — passes.
+- `~/bin/build_apk.sh` — generated `build_output/Rinkulat-debug.apk`.
+- Installed on a Lenovo TB-X306X (Android 10); checked the start screen, Free-play grid and level 15 from screenshots.
+- Banner move: rebuilt, reinstalled on the same tablet, checked the start screen and Free-play grid from screenshots with the test ad loaded.
+
+**Known issues / follow-ups:**
+- Not re-checked on a phone; the sizes work out the same there by calculation.
+- Android 16+ tablets may ignore the portrait lock (see `TODO.md`).
+- The level grid's scroll area stays at 420 dp, so level 16–20 needs scrolling even on a tablet with spare height.
+
+Previous session:
+
 **Date:** 30.10.2026
 
 **What changed:**
