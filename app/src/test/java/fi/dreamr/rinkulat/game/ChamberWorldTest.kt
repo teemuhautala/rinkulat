@@ -543,4 +543,64 @@ class ChamberWorldTest {
         world.run(6f, gx = 1f, gy = 0f)
         assertTrue("ring x ${ring.x}", ring.x > ChamberWorld.WIDTH - ChamberWorld.RING_RADIUS - 0.01f)
     }
+
+    @Test
+    fun drainFinishesInThreeSecondsAndSurfaceOnlyMovesTowardTheLevelsDown() {
+        for ((level, sign) in listOf(1 to 1f, 13 to -1f)) {
+            val world = ChamberWorld(0, Random(1)).apply { reset(0, Tiers.layoutFor(level)) }
+            world.startDrain()
+            assertEquals("level $level starts full", if (sign > 0f) 0f else ChamberWorld.HEIGHT, world.waterSurfaceY, 0f)
+            var last = world.waterSurfaceY
+            var seconds = 0f
+            while (!world.drained) {
+                world.step(step, 0f, 1f, false)
+                seconds += step
+                assertTrue("level $level surface moved back", (world.waterSurfaceY - last) * sign >= -1e-5f)
+                last = world.waterSurfaceY
+                assertTrue("level $level drain overran", seconds < ChamberWorld.DRAIN_SECONDS + 0.05f)
+            }
+            assertEquals(ChamberWorld.DRAIN_SECONDS, seconds, 0.05f)
+            assertEquals("level $level ends empty", if (sign > 0f) ChamberWorld.HEIGHT else 0f, world.waterSurfaceY, 0f)
+        }
+    }
+
+    @Test
+    fun drainLocksRingsOnMovingPegsWhateverTheTilt() {
+        val world = ChamberWorld(4, Random(1)).apply { reset(4, Tiers.layoutFor(20)) }
+        val alongPeg = { ring: ChamberWorld.Ring ->
+            val peg = world.pegs[ring.peg]
+            (ring.x - peg.x) * -kotlin.math.sin(peg.angle) + (ring.y - peg.baseY) * kotlin.math.cos(peg.angle)
+        }
+        world.rings.forEachIndexed { i, ring ->
+            ring.peg = i % 2
+            ring.x = world.pegs[ring.peg].x
+            ring.y = world.pegs[ring.peg].baseY - (i / 2) * ChamberWorld.RING_STACK_HEIGHT * world.pegs[ring.peg].sink
+        }
+        val startDistances = world.rings.map(alongPeg)
+        val startAngle = world.pegs[0].angle
+        world.startDrain()
+        // Longer than the drain: the rings must also hold behind the result card.
+        repeat((6f / step).toInt()) { world.step(step, 0.7f, -1f, false) }
+        world.rings.forEachIndexed { i, ring ->
+            assertTrue("ring $i stayed on", ring.isCaught)
+            assertEquals("ring $i slid", startDistances[i], alongPeg(ring), 0.001f)
+        }
+        assertTrue("pegs keep turning", world.pegs[0].angle != startAngle)
+    }
+
+    @Test
+    fun resetAndRefillClearTheDrain() {
+        val world = ChamberWorld(1, Random(1))
+        world.startDrain()
+        repeat(60) { world.step(step, 0f, 1f, false) }
+        assertTrue(world.drainProgress > 0f)
+        world.refill()
+        assertFalse(world.drainStarted)
+        assertEquals(0f, world.drainProgress, 0f)
+        world.startDrain()
+        repeat(60) { world.step(step, 0f, 1f, false) }
+        world.reset()
+        assertFalse(world.drainStarted)
+        assertEquals(0f, world.drainProgress, 0f)
+    }
 }

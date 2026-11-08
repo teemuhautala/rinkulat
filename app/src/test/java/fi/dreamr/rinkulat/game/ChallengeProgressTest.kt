@@ -34,13 +34,23 @@ class ChallengeProgressTest {
         vm.beginLevel()
     }
 
-    private fun win(vm: GameViewModel) {
+    /** Win and stop at the start of the drain. */
+    private fun winUntilDraining(vm: GameViewModel) {
         // Inject the simulation's win signal: these tests exercise progression, not ring physics.
         ChamberWorld::class.java.getDeclaredField("won").apply {
             isAccessible = true
             setBoolean(vm.world, true)
         }
         vm.advance(0f, 0f, 1f, 0)
+    }
+
+    private fun advanceSeconds(vm: GameViewModel, seconds: Float) {
+        repeat((seconds / 0.05f).toInt()) { vm.advance(0.05f, 0f, 1f, 0) }
+    }
+
+    private fun win(vm: GameViewModel) {
+        winUntilDraining(vm)
+        advanceSeconds(vm, ChamberWorld.DRAIN_SECONDS + 0.2f)
     }
 
     @Test
@@ -217,4 +227,67 @@ class ChallengeProgressTest {
         }
     }
 
+    @Test
+    fun winSavesAtOnceAndShowsResultOnlyAfterTheDrain() {
+        scores.saveHighestLevelReached(7)
+        val vm = model()
+        start(vm)
+        winUntilDraining(vm)
+        assertTrue((vm.phase as GamePhase.Draining).result is GamePhase.LevelComplete)
+        assertEquals(8, scores.highestLevelReached())
+        assertEquals(8, model().challengeStart)
+        advanceSeconds(vm, ChamberWorld.DRAIN_SECONDS - 0.2f)
+        assertTrue(vm.phase is GamePhase.Draining)
+        advanceSeconds(vm, 0.4f)
+        assertTrue(vm.phase is GamePhase.LevelComplete)
+        assertTrue("chamber stays dry behind the card", vm.world.drained)
+    }
+
+    @Test
+    fun freePlayWinSavesBestBeforeTheDrainEnds() {
+        val vm = model()
+        vm.pickFreePlayLevel(1)
+        winUntilDraining(vm)
+        assertTrue((vm.phase as GamePhase.Draining).result is GamePhase.FreePlayWon)
+        assertTrue(1 in scores.freePlayBests())
+        advanceSeconds(vm, ChamberWorld.DRAIN_SECONDS + 0.2f)
+        assertTrue(vm.phase is GamePhase.FreePlayWon)
+    }
+
+    @Test
+    fun runningOutOfTimeSkipsTheDrain() {
+        val vm = model()
+        start(vm)
+        repeat(12_000) {
+            if (vm.phase == GamePhase.Playing) vm.advance(0.05f, 0f, 1f, 0)
+        }
+        assertTrue(vm.phase is GamePhase.RunOver)
+        assertFalse(vm.world.drainStarted)
+    }
+
+    @Test
+    fun quittingMidDrainRefillsAndStaysOnTheMenu() {
+        scores.saveHighestLevelReached(7)
+        val vm = model()
+        start(vm)
+        winUntilDraining(vm)
+        advanceSeconds(vm, 1f)
+        vm.openMenu()
+        assertEquals(GamePhase.Menu, vm.phase)
+        assertFalse(vm.world.drainStarted)
+        advanceSeconds(vm, ChamberWorld.DRAIN_SECONDS + 0.2f)
+        assertEquals(GamePhase.Menu, vm.phase)
+        assertEquals(8, scores.highestLevelReached())
+    }
+
+    @Test
+    fun leavingAResultCardForTheGridRefills() {
+        val vm = model()
+        vm.pickFreePlayLevel(1)
+        win(vm)
+        assertTrue(vm.world.drained)
+        vm.openLevelSelect(GameMode.FreePlay)
+        assertFalse(vm.world.drainStarted)
+        assertEquals(0f, vm.world.drainProgress, 0f)
+    }
 }

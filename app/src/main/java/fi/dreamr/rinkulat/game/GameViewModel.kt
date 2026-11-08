@@ -35,6 +35,9 @@ sealed interface GamePhase {
         val practice: Boolean,
     ) : GamePhase
     data class FreePlayWon(val seconds: Float, val rank: Int?, val level: Int, val newBest: Boolean) : GamePhase
+
+    /** The water drains after a win; [result] is shown once it has gone. Scores are already saved by then. */
+    data class Draining(val result: GamePhase) : GamePhase
 }
 
 /** One tile of the shared level grid. */
@@ -158,6 +161,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         world.shakeY = shakeY
         world.advance(frameDt, gravityX, gravityY, if (playing) pressedJets else 0)
         frame++
+        (phase as? GamePhase.Draining)?.let { if (world.drained) phase = it.result }
         if (playing) {
             when (mode) {
                 GameMode.FreePlay -> if (world.won) finishFreePlay()
@@ -173,6 +177,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     fun openLevelSelect(selectedMode: GameMode = GameMode.FreePlay) {
         commitName()
+        world.refill()
         levelSelectMode = selectedMode
         challengeStart = restoredChallengeLevel()
         scoresVisible = false
@@ -306,6 +311,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     fun openMenu() {
         commitName()
+        world.refill()
         challengeStart = restoredChallengeLevel()
         scoresVisible = false
         phase = GamePhase.Menu
@@ -380,7 +386,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         if (level >= Tiers.MAX_LEVEL) {
             finishRun(allCleared = true)
         } else {
-            phase = GamePhase.LevelComplete(level, levelScore, totalScore)
+            showResult(GamePhase.LevelComplete(level, levelScore, totalScore))
         }
     }
 
@@ -406,7 +412,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             namingEntry = newRank != null
             rank = newRank
         }
-        phase = GamePhase.RunOver(totalScore, runStartLevel, levelsCleared, allCleared, rank, practiceRun)
+        showResult(GamePhase.RunOver(totalScore, runStartLevel, levelsCleared, allCleared, rank, practiceRun))
     }
 
     private fun finishFreePlay() {
@@ -427,7 +433,17 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             freePlayBests = freePlayBests + (freePlayLevel to millis)
             scores.saveFreePlayBests(freePlayBests)
         }
-        phase = GamePhase.FreePlayWon(seconds, rank, freePlayLevel, newBest)
+        showResult(GamePhase.FreePlayWon(seconds, rank, freePlayLevel, newBest))
+    }
+
+    /** A win drains the water before its result card; running out of time goes straight to the card. */
+    private fun showResult(result: GamePhase) {
+        if (world.won) {
+            world.startDrain()
+            phase = GamePhase.Draining(result)
+        } else {
+            phase = result
+        }
     }
 
     private fun currentHud(): HudState {

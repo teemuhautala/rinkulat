@@ -7,8 +7,8 @@ Package: `fi.dreamr.rinkulat` · single-module Compose app (`:app`), portrait on
 ## Architecture
 
 - `game/ChamberWorld.kt` — pure-Kotlin simulation (no Android dependencies, unit-tested). Holds rings, pegs, decorative particles, jet strength, timer and win state. All tuning constants live in its companion object.
-- `game/GameViewModel.kt` — owns the world, mode (free play / challenge) and phase state machine (start, level intro, playing, level complete, run over, free-play won), countdown, scoring and score lists; a `frame` counter drives canvas redraws.
-- `game/TiltSensor.kt` — `rememberTiltReading()`: gravity sensor (accelerometer fallback) converted to screen-axis gravity in g units.
+- `game/GameViewModel.kt` — owns the world, mode (free play / challenge) and phase state machine (start, level intro, playing, draining, level complete, run over, free-play won), countdown, scoring and score lists; a `frame` counter drives canvas redraws.
+- `game/TiltSensor.kt` — `rememberTiltReading()`: gravity sensor (accelerometer fallback) converted to screen-axis gravity in g units using the display rotation. Turning the device 10° past sideways flips the activity between portrait and reverse portrait (never landscape). The vertical component is clamped so gravity never points up the screen, so turning the device over can't lift the rings, even in the margin, mid-rotation, or where orientation requests are ignored.
 - `game/LevelLayout.kt` — level mechanics only: jets (nozzle + direction), obstacle, current and upside-down flag. `LEVELS` lists every level with its map `number`.
 - `game/Tiers.kt` — map rules: chapters of 5 levels (theme id, rings and seconds per level), unlocked starting levels, level lookup by number, level score.
 - `game/ScoreRepository.kt` — SharedPreferences `rinkulat_scores`: top-10 lists with player names (challenge points; free-play times per level), last player name, highest level reached (unlocks) best free-play time per level and the remembered Challenge level.
@@ -27,6 +27,7 @@ On wide screens the HUD and toy case fill the width. The chamber keeps its 2:3 r
 - A ring is caught when it comes down onto a peg tip, centered within `CATCH_TOLERANCE`, and lying flat enough (`CATCH_MIN_FLATNESS`). Caught rings slide on the peg, stack, and can be pushed off the top by a strong jet.
 - Bubbles drift opposite the device gravity used by rings, including the vertical flip in upside-down levels. Their rise weakens as the device lies flat. In weightless space levels, bubble motion (buoyancy and flow) is reduced to 12% speed.
 - Win: all rings caught and settled onto their stacks (the clock stops at that moment). Pegs hold 12 rings each.
+- Win animation: scores and progress are saved at the win, then the water drains over `DRAIN_SECONDS` (3 s) before the result card. Running out of time skips it. Rings stay locked on their pegs, and moving pegs keep moving and carry them, until the water is restored on returning to the menu or level grid. The drain runs toward the level's "down", so upside-down levels drain toward the top. A fish already in the level swims out through its nearer side wall, staying underwater; one never appears just for the ending.
 
 ## Build
 

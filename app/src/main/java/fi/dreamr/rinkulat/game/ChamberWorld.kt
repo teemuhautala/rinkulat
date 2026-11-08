@@ -88,7 +88,9 @@ class ChamberWorld(
         internal var escapeY = 0f
         internal var escapeStrength = 0f
         internal var hitReactionRemaining = 0f
-        val escaping get() = escapeRemaining > 0f
+        internal var leaving = false
+        internal var exitX = 0f
+        val escaping get() = escapeRemaining > 0f || leaving
         val reactingToHit get() = hitReactionRemaining > 0f
     }
 
@@ -271,6 +273,20 @@ class ChamberWorld(
         f.y = (f.y + (sin(f.heading) * speed + pushY * pushResponse) * dt).coerceIn(0.04f, HEIGHT - 0.04f)
     }
 
+    /** The fish swims out through its nearer side wall, keeping ahead of the falling surface. */
+    private fun stepFishExit(dt: Float) {
+        val f = fish ?: return
+        f.age += dt
+        // Angling toward the drain side keeps a fish that starts near the surface underwater.
+        val targetY = if (layout.upsideDown) min(f.y, HEIGHT - FISH_EXIT_DIVE) else max(f.y, FISH_EXIT_DIVE)
+        val desired = kotlin.math.atan2(targetY - f.y, f.exitX - f.x)
+        val turn = kotlin.math.atan2(sin(desired - f.heading), cos(desired - f.heading))
+        f.heading += turn * min(1f, dt * FISH_ESCAPE_TURN_RATE)
+        f.x += cos(f.heading) * FISH_EXIT_SPEED * dt
+        f.y += sin(f.heading) * FISH_EXIT_SPEED * dt
+        if (f.x < -FISH_EXIT_MARGIN || f.x > WIDTH + FISH_EXIT_MARGIN) fish = null
+    }
+
     class Particle(var x: Float, var y: Float, val size: Float, val isBubble: Boolean)
 
     var layout: LevelLayout = LevelLayout.CLASSIC
@@ -310,6 +326,42 @@ class ChamberWorld(
         private set
 
     val caughtCount get() = rings.count { it.isCaught }
+
+    /** The end-of-level drain has begun; rings stay locked on their pegs until [refill] or [reset]. */
+    var drainStarted = false
+        private set
+
+    /** Share of [DRAIN_SECONDS] that has passed, 0 to 1. */
+    var drainProgress = 0f
+        private set
+
+    val drained get() = drainProgress >= 1f
+
+    /** Where the water ends; it drains toward the level's "down", which is the top on upside-down levels. */
+    val waterSurfaceY: Float
+        get() {
+            val p = drainProgress
+            val fallen = HEIGHT * p * p * (3f - 2f * p)
+            return if (layout.upsideDown) HEIGHT - fallen else fallen
+        }
+
+    fun startDrain() {
+        drainStarted = true
+        fish?.apply {
+            leaving = true
+            target = null
+            pulling = false
+            val margin = FISH_EXIT_MARGIN + 0.05f
+            exitX = if (x < WIDTH / 2f) -margin else WIDTH + margin
+        }
+    }
+
+    /** Bring the water straight back, for when the chamber is shown behind the menus again. */
+    fun refill() {
+        drainStarted = false
+        drainProgress = 0f
+        if (fish?.leaving == true) fish = null
+    }
 
     private var time = 0f
     private var accumulator = 0f
@@ -353,6 +405,14 @@ class ChamberWorld(
                 s * exp(-dt / JET_DECAY_TIME)
             }
             jet = max(jet, jetStrengths[i])
+        }
+
+        if (drainStarted) {
+            // No ring physics: movePegs already carries the locked rings with any moving peg.
+            drainProgress = min(1f, drainProgress + dt / DRAIN_SECONDS)
+            stepParticles(dt, gravityX, gravityY * if (layout.upsideDown) -1f else 1f)
+            stepFishExit(dt)
+            return
         }
 
         // Weightless levels keep a faint pull so tilting still steers rings and caught rings still settle.
@@ -441,6 +501,8 @@ class ChamberWorld(
         elapsed = 0f
         started = false
         won = false
+        drainStarted = false
+        drainProgress = 0f
         accumulator = 0f
         time = 0f
     }
@@ -908,6 +970,10 @@ class ChamberWorld(
     }
 
     companion object {
+        const val DRAIN_SECONDS = 3f
+        const val FISH_EXIT_SPEED = 1.1f
+        const val FISH_EXIT_DIVE = 0.35f
+        const val FISH_EXIT_MARGIN = 0.1f
         const val FISH_FIRST_LEVEL = 6
         const val FISH_ESCAPE_SECONDS = 0.65f
         const val FISH_ESCAPE_DISTANCE = 0.35f

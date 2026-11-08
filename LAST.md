@@ -1,5 +1,42 @@
 # Last session
 
+**Date:** 08.11.2026
+
+**What changed:**
+Closed the upside-down cheat. Tilt is now converted using the actual display rotation, and the vertical gravity is clamped so it never points up the screen. Turning the device 10° past sideways (with at least 0.3 g in-plane) requests the opposite portrait orientation, so the whole app flips with the device. Landscape is never requested, and the manifest still starts in portrait. Smoothed gravity is kept in device axes so a flip never blends two screen frames, and shakes use the same conversion.
+
+**Verification performed:**
+- `env -u ANDROID_SDK_ROOT ./gradlew test assembleDebug` — passes; 89 tests in each variant, 4 of them new in `TiltSensorTest`.
+- `~/bin/build_apk.sh` — generated `build_output/Rinkulat-debug.apk`.
+- Pixel 7a emulator with the virtual accelerometer, in Free play level 1:
+  - Upright stayed at 0°, 95° stayed at 0° with rings sliding sideways and not rising, and 105° flipped to 180°.
+  - Upside down stayed at 180°, 95° the other way stayed at 180°, and back upright flipped to 0°.
+  - The level kept running through every flip, with the same process ID.
+- Installed on the Samsung SM-S931B over the bridge after it reconnected.
+
+**Known issues / follow-ups:**
+- Not checked by physically turning a real device. The rotation animation speed and how the flip feels mid-level need a hand test.
+- Android 16+ large screens may ignore the orientation request. Gravity stays safe there, but the screen won't flip.
+
+Previous session:
+
+**Date:** 07.11.2026
+
+**What changed:**
+Added a win animation. When all rings have settled, the water drains over 3 seconds and then the result card appears over the dry chamber. Scores and progress are saved at the moment of the win, so the animation doesn't affect the score and closing the app during it loses nothing. Running out of time skips it. Rings stay locked on their pegs while moving pegs keep moving. Any fish already in the level swims out through its nearer side wall while staying underwater. Upside-down levels drain toward the top. Returning to the menu or level grid restores the water.
+
+**Verification performed:**
+- `env -u ANDROID_SDK_ROOT ./gradlew test assembleDebug` — passes; 85 tests in each variant, 11 of them new.
+- `~/bin/build_apk.sh` — generated `build_output/Rinkulat-debug.apk`.
+- Pixel 7a emulator: checked recordings of levels 1, 8, 13 and 20 using a temporary hook that started the drain 2 seconds into a level. The hook has been removed.
+
+**Known issues / follow-ups:**
+- The real win-to-card path is only covered by unit tests; it has not been seen on a device.
+- The hook started the drain with rings loose, so rings stacked on pegs during the drain have not been seen on screen.
+- Not checked on the Lenovo tablet, which disconnected; it still has the previous build.
+
+Previous session:
+
 **Date:** 04.11.2026
 
 **What changed:**

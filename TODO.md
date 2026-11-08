@@ -24,4 +24,6 @@
 
 - Play-test bubble buoyancy while tilting/rotating the device and the slow 12% bubble motion in space levels.
 
-- Android 16+ large screens (sw ≥ 600 dp, targetSdk 36) ignore `screenOrientation="portrait"`, so the app can run in landscape there, where the height-limited chamber is small. Not checked on such a device; decide whether to add a landscape layout or opt out.
+- Android 16+ large screens (sw ≥ 600 dp, targetSdk 36) ignore `screenOrientation="portrait"`, so the app can run in landscape there, where the height-limited chamber is small. Not checked on such a device; decide whether to add a landscape layout or opt out. Gravity stays correct there: tilt uses the actual display rotation and never points up the screen.
+
+- Play-test the win animation on a device: dry-chamber colours per theme (`DRY_CHAMBER_DARKEN`), fish exit timing (`FISH_EXIT_SPEED`) and whether 3 seconds feels right on repeated wins (there is no tap-to-skip).

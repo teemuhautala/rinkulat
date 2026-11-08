@@ -532,4 +532,54 @@ class FishTest {
         repeat(24) { frame(0) }
         assertNotNull("may attack again after 30 seconds", fish.target)
     }
+
+    @Test fun fishStaysUnderwaterAndLeavesByTheNearerWallLongBeforeTheWaterIsGone() {
+        for (level in listOf(8, 13)) for (x in listOf(0.06f, 0.3f, 0.7f, 0.94f)) {
+            for (y in listOf(0.04f, 0.4f, 0.75f, 1.1f, 1.46f)) for (heading in listOf(0f, 3.14f, 1.57f, -1.57f)) {
+                val w = ChamberWorld(0, Random(1))
+                w.reset(0, Tiers.layoutFor(level))
+                w.summonFish()
+                val f = w.fish!!
+                f.x = x
+                f.y = y
+                f.heading = heading
+                w.startDrain()
+                val case = "level $level from ($x, $y) heading $heading"
+                var lastX = x
+                var seconds = 0f
+                while (w.fish != null) {
+                    val underwater = if (w.layout.upsideDown) f.y <= w.waterSurfaceY else f.y >= w.waterSurfaceY
+                    assertTrue("$case left the water at ${seconds}s", underwater)
+                    lastX = f.x
+                    w.step(ChamberWorld.STEP_DT, 0f, 1f, false)
+                    seconds += ChamberWorld.STEP_DT
+                    assertTrue("$case still inside after ${seconds}s", seconds < 1f)
+                }
+                assertEquals("$case took the far wall", x < 0.5f, lastX < 0.5f)
+            }
+        }
+    }
+
+    @Test fun drainNeverBringsInAFish() {
+        for (level in listOf(1, 8)) {
+            val w = ChamberWorld(0, Random(1))
+            w.reset(0, Tiers.layoutFor(level))
+            w.startDrain()
+            repeat(400) {
+                w.step(ChamberWorld.STEP_DT, 0f, 1f, false)
+                assertNull(w.fish)
+            }
+        }
+    }
+
+    @Test fun refillDropsAFishThatWasLeaving() {
+        val w = ChamberWorld(0, Random(1))
+        w.reset(0, Tiers.layoutFor(8))
+        w.summonFish()
+        w.startDrain()
+        w.step(ChamberWorld.STEP_DT, 0f, 1f, false)
+        assertNotNull(w.fish)
+        w.refill()
+        assertNull(w.fish)
+    }
 }

@@ -55,8 +55,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -256,23 +258,27 @@ private fun Hud(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Text(
-                if (atStart) "Rinkulat" else "Caught ${state.caught}/${state.total}",
-                color = PanelText,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-            )
+            // The timer shares the second row so the level title gets the full width above.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    if (atStart) "Rinkulat" else "Caught ${state.caught}/${state.total}",
+                    color = PanelText,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    if (atStart) "" else formatTime(state.seconds),
+                    modifier = Modifier.width(64.dp),
+                    textAlign = TextAlign.Center,
+                    color = if (state.lowTime) LowTimeRed else PanelText,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                )
+            }
         }
-        Text(
-            if (atStart) "" else formatTime(state.seconds),
-            modifier = Modifier.width(72.dp),
-            textAlign = TextAlign.Center,
-            color = if (state.lowTime) LowTimeRed else PanelText,
-            fontSize = 22.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-        )
         Row(Modifier.width(96.dp), horizontalArrangement = Arrangement.End) {
             if (atStart) {
                 IconButton(onClick = onScores) {
@@ -462,16 +468,31 @@ private fun Chamber(world: ChamberWorld, theme: ToyTheme, frame: () -> Long, mod
         val offsetX = (size.width - ChamberWorld.WIDTH * scale) / 2f
         val offsetY = size.height - ChamberWorld.HEIGHT * scale
 
-        drawRect(Brush.verticalGradient(listOf(theme.liquidTop.copy(alpha = 0.85f), theme.liquidBottom)))
+        val liquid = Brush.verticalGradient(listOf(theme.liquidTop.copy(alpha = 0.85f), theme.liquidBottom))
+        val drain = if (world.drainStarted) drainShapes(world, scale) else null
+        if (drain == null) drawRect(liquid)
         translate(offsetX, offsetY) {
+            if (drain != null) {
+                drawPath(drain.water, liquid)
+                drawPath(drain.dry, lerp(theme.liquidBottom, Color.Black, DRY_CHAMBER_DARKEN))
+            }
             when (theme.scenery) {
                 Scenery.Garden -> drawGardenScenery(scale)
                 Scenery.Sea -> drawSeaScenery(scale)
                 Scenery.Space -> drawSpaceScenery(scale)
                 Scenery.Mechanicals -> drawMechanicalScenery(scale, world.clock)
             }
-            drawParticles(world, theme.particle, scale)
-            drawJets(world, scale)
+            if (drain != null) {
+                // Bubbles, specks and streams exist only in the remaining water.
+                clipPath(drain.water) {
+                    drawParticles(world, theme.particle, scale)
+                    drawJets(world, scale)
+                }
+                if (!world.drained) drawPath(drain.surface, Color.White.copy(alpha = 0.6f), style = Stroke(0.006f * scale))
+            } else {
+                drawParticles(world, theme.particle, scale)
+                drawJets(world, scale)
+            }
             world.layout.obstacles.forEach { drawObstacle(it, scale, world.layout.attractingObstacles) }
             world.layout.wormholes?.let { (a, b) ->
                 // The two mouths swirl in opposite directions: in one, out the other.
@@ -496,6 +517,40 @@ private fun Chamber(world: ChamberWorld, theme: ToyTheme, frame: () -> Long, mod
 }
 
 private enum class Arc { Full, Back, Front }
+
+private const val DRY_CHAMBER_DARKEN = 0.55f
+private const val RIPPLE_SEGMENTS = 32
+
+private class DrainShapes(val water: Path, val dry: Path, val surface: Path)
+
+/** The water and the emptied part of the chamber, split along a rippling surface. */
+private fun drainShapes(world: ChamberWorld, scale: Float): DrainShapes {
+    val width = ChamberWorld.WIDTH * scale
+    val height = ChamberWorld.HEIGHT * scale
+    val floorY = if (world.layout.upsideDown) 0f else height
+    val emptyEdgeY = height - floorY
+    val surfaceY = world.waterSurfaceY * scale
+    // No ripple at either end, so the surface grows smoothly out of the full chamber.
+    val ripple = 0.014f * scale * sin(world.drainProgress * PI.toFloat())
+    fun Path.traceSurface(startWithMove: Boolean) {
+        for (i in 0..RIPPLE_SEGMENTS) {
+            val x = width * i / RIPPLE_SEGMENTS
+            val y = surfaceY + ripple * sin(i * 0.55f + world.clock * 7f)
+            if (startWithMove && i == 0) moveTo(x, y) else lineTo(x, y)
+        }
+    }
+    fun regionTo(edgeY: Float) = Path().apply {
+        moveTo(0f, edgeY)
+        traceSurface(startWithMove = false)
+        lineTo(width, edgeY)
+        close()
+    }
+    return DrainShapes(
+        water = regionTo(floorY),
+        dry = regionTo(emptyEdgeY),
+        surface = Path().apply { traceSurface(startWithMove = true) },
+    )
+}
 
 /** Muted brass machinery stays behind the bright rings and translucent pegs. */
 private fun DrawScope.drawMechanicalScenery(scale: Float, clock: Float) {

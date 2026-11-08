@@ -264,7 +264,7 @@ fun PhaseOverlay(
     onNameChange: (String) -> Unit,
 ) {
     when (phase) {
-        GamePhase.Menu, GamePhase.Playing, GamePhase.LevelSelect, GamePhase.Settings -> Unit
+        GamePhase.Menu, GamePhase.Playing, GamePhase.LevelSelect, GamePhase.Settings, is GamePhase.Draining -> Unit
         is GamePhase.LevelIntro -> OverlayCard {
             Title("Level ${phase.level}")
             Text(phase.title, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = PanelText)
